@@ -14,3 +14,11 @@ let currentStaff = null;
 
     loadDailyReport();
 })();
+
+async function loadDailyReport() {
+
+    const selectedDate = document.getElementById("report-date").value;
+
+    alert("Loading report for " + selectedDate);
+
+}
