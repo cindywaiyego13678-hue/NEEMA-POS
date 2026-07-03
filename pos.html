@@ -28,14 +28,38 @@
           <label>Search product</label>
           <input type="text" id="product-search" placeholder="Type name or type...">
         </div>
-        <div id="product-list" style="max-height:420px; overflow-y:auto;"></div>
+        <div id="product-list" style="max-height:340px; overflow-y:auto;"></div>
+
+        <div style="border-top:1px solid var(--border); margin-top:14px; padding-top:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3 style="margin:0;">Held Sales</h3>
+          </div>
+          <div id="held-sales-list" style="margin-top:8px;"></div>
+        </div>
       </div>
 
       <div class="card">
-        <h3 style="margin-top:0;">Current Sale</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin-top:0; margin-bottom:0;">Current Sale</h3>
+          <button class="secondary" style="padding:6px 10px; font-size:0.8rem;" onclick="holdSale()">Hold Sale</button>
+        </div>
         <div id="cart-items"></div>
+
+        <div class="field" style="margin-top:10px;">
+          <label>Discount (Ksh)</label>
+          <input type="number" id="discount-amount" min="0" placeholder="0" value="0">
+        </div>
+
         <div style="border-top:1px solid var(--border); margin-top:10px; padding-top:10px;">
-          <div style="display:flex; justify-content:space-between; font-weight:700; font-size:1.1rem;">
+          <div style="display:flex; justify-content:space-between; font-size:0.9rem; color:var(--muted);">
+            <span>Subtotal</span>
+            <span id="cart-subtotal">Ksh 0</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:0.9rem; color:var(--muted);">
+            <span>Discount</span>
+            <span id="cart-discount">− Ksh 0</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-weight:700; font-size:1.1rem; margin-top:4px;">
             <span>Total</span>
             <span id="cart-total">Ksh 0</span>
           </div>
@@ -64,6 +88,17 @@
     </div>
   </div>
 
+  <!-- Receipt modal -->
+  <div id="receipt-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:60;"></div>
+  <div id="receipt-panel" class="card" style="display:none; position:fixed; top:5%; left:50%; transform:translateX(-50%); width:92%; max-width:380px; z-index:70; max-height:88vh; overflow-y:auto;">
+    <div id="receipt-content" style="font-family: 'Courier New', monospace; font-size:0.85rem; line-height:1.5;"></div>
+    <div style="display:flex; gap:8px; margin-top:16px;">
+      <button style="flex:1;" onclick="printReceipt()">🖨️ Print</button>
+      <button class="gold" style="flex:1;" onclick="shareReceiptWhatsapp()">📱 WhatsApp</button>
+    </div>
+    <button class="secondary" style="width:100%; margin-top:8px;" onclick="closeReceipt()">Close</button>
+  </div>
+
   <script src="js/offline-cache.js"></script>
   <script src="js/supabase-config.js"></script>
   <script src="js/offline-sync.js"></script>
@@ -71,6 +106,8 @@
     let cart = []; // { product, quantity }
     let allProducts = [];
     let currentStaff = null;
+    let lastReceiptData = null;
+    const HELD_SALES_KEY = 'appliance_pos_held_sales';
 
     (async () => {
       currentStaff = await requireAuth(['admin','manager','cashier']);
@@ -78,6 +115,7 @@
       document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
       renderNav(currentStaff.role);
       await loadProducts();
+      renderHeldSales();
     })();
 
     function renderNav(role) {
@@ -85,8 +123,7 @@
       if (role === 'admin' || role === 'manager') tabs.push({ href: 'inventory.html', label: 'Inventory' });
       if (role === 'admin') tabs.push({ href: 'dashboard.html', label: 'Dashboard' });
       if (role === 'admin') tabs.push({ href: 'staff.html', label: 'Staff' });
-      if (role === 'admin')
-    tabs.push({ href: 'reports.html', label: 'Reports' });
+      if (role === 'admin') tabs.push({ href: 'reports.html', label: 'Reports' });
       document.getElementById('nav-tabs').innerHTML = tabs.map(t =>
         `<a href="${t.href}" class="${t.href === 'pos.html' ? 'active' : ''}">${t.label}</a>`
       ).join('');
@@ -167,6 +204,15 @@
       renderCart();
     }
 
+    function getSubtotal() {
+      return cart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0);
+    }
+
+    function getDiscount() {
+      const val = parseFloat(document.getElementById('discount-amount').value);
+      return isNaN(val) || val < 0 ? 0 : val;
+    }
+
     function renderCart() {
       const el = document.getElementById('cart-items');
       if (!cart.length) {
@@ -186,10 +232,99 @@
           </div>
         `).join('');
       }
-      const total = cart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0);
-      document.getElementById('cart-total').textContent = `Ksh ${total.toLocaleString()}`;
+      updateTotals();
     }
 
+    function updateTotals() {
+      const subtotal = getSubtotal();
+      const discount = Math.min(getDiscount(), subtotal);
+      const total = subtotal - discount;
+      document.getElementById('cart-subtotal').textContent = `Ksh ${subtotal.toLocaleString()}`;
+      document.getElementById('cart-discount').textContent = `− Ksh ${discount.toLocaleString()}`;
+      document.getElementById('cart-total').textContent = `Ksh ${total.toLocaleString()}`;
+    }
+    document.getElementById('discount-amount').addEventListener('input', updateTotals);
+
+    // ---------- Hold / Resume sales ----------
+    function getHeldSales() {
+      try { return JSON.parse(localStorage.getItem(HELD_SALES_KEY)) || []; }
+      catch (e) { return []; }
+    }
+    function saveHeldSales(list) {
+      localStorage.setItem(HELD_SALES_KEY, JSON.stringify(list));
+    }
+
+    function holdSale() {
+      if (!cart.length) { alert('Cart is empty — nothing to hold.'); return; }
+      const label = prompt('Label this held sale (e.g. customer name):', document.getElementById('customer-name').value || 'Held sale');
+      if (label === null) return;
+
+      const held = getHeldSales();
+      held.push({
+        id: Date.now(),
+        label,
+        cart: cart.map(item => ({ productId: item.product.id, quantity: item.quantity })),
+        discount: getDiscount(),
+        customerName: document.getElementById('customer-name').value,
+        customerPhone: document.getElementById('customer-phone').value,
+        heldAt: new Date().toISOString()
+      });
+      saveHeldSales(held);
+
+      cart = [];
+      document.getElementById('discount-amount').value = 0;
+      document.getElementById('customer-name').value = '';
+      document.getElementById('customer-phone').value = '';
+      renderCart();
+      renderHeldSales();
+    }
+
+    function renderHeldSales() {
+      const held = getHeldSales();
+      const el = document.getElementById('held-sales-list');
+      if (!held.length) { el.innerHTML = '<div class="empty-state" style="padding:12px;">No held sales</div>'; return; }
+      el.innerHTML = held.map(h => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:0.85rem;">
+          <div>
+            <strong>${escapeHtml(h.label)}</strong>
+            <div style="color:var(--muted); font-size:0.75rem;">${h.cart.length} item(s)</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="secondary" style="padding:4px 8px; font-size:0.75rem;" onclick="resumeSale(${h.id})">Resume</button>
+            <button class="danger" style="padding:4px 8px; font-size:0.75rem;" onclick="discardHeldSale(${h.id})">✕</button>
+          </div>
+        </div>`).join('');
+    }
+
+    function resumeSale(holdId) {
+      if (cart.length && !confirm('This will replace your current cart. Continue?')) return;
+      const held = getHeldSales();
+      const entry = held.find(h => h.id === holdId);
+      if (!entry) return;
+
+      cart = entry.cart
+        .map(ci => {
+          const product = allProducts.find(p => p.id === ci.productId);
+          return product ? { product, quantity: ci.quantity } : null;
+        })
+        .filter(Boolean);
+
+      document.getElementById('discount-amount').value = entry.discount || 0;
+      document.getElementById('customer-name').value = entry.customerName || '';
+      document.getElementById('customer-phone').value = entry.customerPhone || '';
+
+      saveHeldSales(held.filter(h => h.id !== holdId));
+      renderCart();
+      renderHeldSales();
+    }
+
+    function discardHeldSale(holdId) {
+      if (!confirm('Discard this held sale?')) return;
+      saveHeldSales(getHeldSales().filter(h => h.id !== holdId));
+      renderHeldSales();
+    }
+
+    // ---------- Checkout ----------
     async function checkout() {
       const errorEl = document.getElementById('checkout-error');
       errorEl.style.display = 'none';
@@ -204,7 +339,9 @@
       btn.disabled = true;
       btn.textContent = 'Processing...';
 
-      const total = cart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0);
+      const subtotal = getSubtotal();
+      const discount = Math.min(getDiscount(), subtotal);
+      const total = subtotal - discount;
       const paymentMethod = document.getElementById('payment-method').value;
       const customerName = document.getElementById('customer-name').value.trim() || null;
       const customerPhone = document.getElementById('customer-phone').value.trim() || null;
@@ -215,6 +352,8 @@
         customer_phone: customerPhone,
         payment_method: paymentMethod,
         total_amount: total,
+        subtotal_amount: subtotal,
+        discount_amount: discount,
         status: 'completed',
         items: cart.map(item => ({
           product_id: item.product.id,
@@ -222,6 +361,10 @@
           quantity: item.quantity
         }))
       };
+
+      const receiptItems = cart.map(item => ({
+        name: item.product.name, quantity: item.quantity, price: item.product.price
+      }));
 
       try {
         if (!navigator.onLine) throw new Error('offline');
@@ -241,22 +384,81 @@
           await supabaseClient.from('products').update({ stock_quantity: newQty }).eq('id', it.product_id);
         }
 
-        alert(`Sale completed! Total: Ksh ${total.toLocaleString()}`);
+        showReceipt({ items: receiptItems, subtotal, discount, total, paymentMethod, customerName, customerPhone, date: new Date() });
       } catch (err) {
         console.warn('Online checkout failed, queueing offline', err);
         await queueSaleOffline(saleData);
-        alert(`No connection — sale saved offline and will sync automatically. Total: Ksh ${total.toLocaleString()}`);
+        showReceipt({ items: receiptItems, subtotal, discount, total, paymentMethod, customerName, customerPhone, date: new Date(), offline: true });
         const pending = await getPendingSales();
         updateSyncBadge(pending.length);
       }
 
       cart = [];
       renderCart();
+      document.getElementById('discount-amount').value = 0;
       document.getElementById('customer-name').value = '';
       document.getElementById('customer-phone').value = '';
       btn.disabled = false;
       btn.textContent = 'Complete Sale';
       await loadProducts();
+    }
+
+    // ---------- Receipt ----------
+    function showReceipt(data) {
+      lastReceiptData = data;
+      const shopName = 'Appliance Shop';
+      const lines = data.items.map(it =>
+        `${it.name} x${it.quantity}`.padEnd(28) + `Ksh ${(it.price * it.quantity).toLocaleString()}`
+      ).join('\n');
+
+      document.getElementById('receipt-content').innerHTML = `
+        <div style="text-align:center; margin-bottom:10px;">
+          <strong style="font-size:1rem;">${escapeHtml(shopName)}</strong><br>
+          <span style="font-size:0.75rem; color:var(--muted);">${data.date.toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+        </div>
+        <div style="border-top:1px dashed var(--border); border-bottom:1px dashed var(--border); padding:8px 0; margin:8px 0; white-space:pre-wrap;">${escapeHtml(lines)}</div>
+        <div style="display:flex; justify-content:space-between;"><span>Subtotal</span><span>Ksh ${data.subtotal.toLocaleString()}</span></div>
+        ${data.discount > 0 ? `<div style="display:flex; justify-content:space-between;"><span>Discount</span><span>− Ksh ${data.discount.toLocaleString()}</span></div>` : ''}
+        <div style="display:flex; justify-content:space-between; font-weight:700; margin-top:4px;"><span>TOTAL</span><span>Ksh ${data.total.toLocaleString()}</span></div>
+        <div style="margin-top:8px; font-size:0.8rem; color:var(--muted);">Payment: ${escapeHtml(data.paymentMethod)}</div>
+        ${data.customerName ? `<div style="font-size:0.8rem; color:var(--muted);">Customer: ${escapeHtml(data.customerName)}</div>` : ''}
+        ${data.offline ? `<div style="margin-top:8px; color:var(--gold); font-size:0.8rem;">⚠️ Saved offline — will sync when back online</div>` : ''}
+        <div style="text-align:center; margin-top:12px; font-size:0.8rem; color:var(--muted);">Thank you for your business!</div>
+      `;
+      document.getElementById('receipt-overlay').style.display = 'block';
+      document.getElementById('receipt-panel').style.display = 'block';
+    }
+
+    function closeReceipt() {
+      document.getElementById('receipt-overlay').style.display = 'none';
+      document.getElementById('receipt-panel').style.display = 'none';
+    }
+
+    function printReceipt() {
+      const content = document.getElementById('receipt-content').innerHTML;
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(`
+        <html><head><title>Receipt</title>
+        <style>body{font-family:'Courier New',monospace; font-size:13px; padding:20px;}</style>
+        </head><body>${content}</body></html>
+      `);
+      printWindow.document.close();
+      printWindow.print();
+    }
+
+    function shareReceiptWhatsapp() {
+      if (!lastReceiptData) return;
+      const d = lastReceiptData;
+      const lines = d.items.map(it => `${it.name} x${it.quantity} - Ksh ${(it.price * it.quantity).toLocaleString()}`).join('%0A');
+      let text = `*Appliance Shop Receipt*%0A${d.date.toLocaleString('en-KE')}%0A%0A${lines}%0A%0ASubtotal: Ksh ${d.subtotal.toLocaleString()}`;
+      if (d.discount > 0) text += `%0ADiscount: -Ksh ${d.discount.toLocaleString()}`;
+      text += `%0A*TOTAL: Ksh ${d.total.toLocaleString()}*%0A%0AThank you for your business!`;
+
+      const phone = d.customerPhone ? d.customerPhone.replace(/\D/g, '') : '';
+      const waUrl = phone
+        ? `https://wa.me/${phone.startsWith('0') ? '254' + phone.slice(1) : phone}?text=${text}`
+        : `https://wa.me/?text=${text}`;
+      window.open(waUrl, '_blank');
     }
 
     function escapeHtml(str) {
@@ -267,3 +469,4 @@
   </script>
 </body>
 </html>
+
