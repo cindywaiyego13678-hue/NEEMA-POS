@@ -71,9 +71,38 @@
     <p class="error-text" id="edit-product-error" style="display:none;"></p>
   </div>
   <div id="edit-panel-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:40;" onclick="closeEditPanel()"></div>
-  <script src="js/offline-cache.js"></script>
-  <script src="js/supabase-config.js"></script>
   <script>
+const CACHE_PREFIX = 'appliance_pos_cache_';
+
+function cacheSet(key, data) {
+    try {
+        localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({
+            data,
+            cachedAt: new Date().toISOString()
+        }));
+    } catch (e) {
+        console.warn(e);
+    }
+}
+
+function cacheGet(key) {
+    try {
+        const raw = localStorage.getItem(CACHE_PREFIX + key);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (e) {
+        return null;
+    }
+}
+
+function showOfflineBanner(cachedAt) {}
+
+function hideOfflineBanner() {}
+</script>
+
+<script src="js/supabase-config.js"></script>
+
+<script>
     let currentStaff = null;
     let allProducts = [];
 
