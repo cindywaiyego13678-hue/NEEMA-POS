@@ -12,13 +12,44 @@ let currentStaff = null;
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('report-date').value = today;
 
+    // Load report immediately for today
     loadDailyReport();
 })();
 
-async function loadDailyReport() {
-
+// Make sure this is global so HTML onclick can find it
+window.loadDailyReport = async function() {
     const selectedDate = document.getElementById("report-date").value;
 
-    alert("Loading report for " + selectedDate);
+    // Fetch sales data from backend API
+    try {
+        const response = await fetch(`/api/reports?date=${selectedDate}`);
+        const data = await response.json();
 
-}
+        // Update summary boxes
+        document.getElementById("transactions").textContent = data.transactions;
+        document.getElementById("revenue").textContent = `KSh ${data.revenue}`;
+        document.getElementById("items-sold").textContent = data.items_sold;
+        document.getElementById("average-sale").textContent = `KSh ${data.average_sale}`;
+
+        // Populate sales list table
+        const tableBody = document.getElementById("sales-list");
+        tableBody.innerHTML = ""; // clear old rows
+
+        data.sales.forEach(sale => {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+                <td>${sale.receipt}</td>
+                <td>${sale.cashier}</td>
+                <td>KSh ${sale.amount}</td>
+                <td>${sale.payment}</td>
+                <td>${sale.time}</td>
+            `;
+            tableBody.appendChild(row);
+        });
+
+    } catch (err) {
+        console.error("Error loading report:", err);
+        alert("Failed to load report. Check API or server logs.");
+    }
+};
+
