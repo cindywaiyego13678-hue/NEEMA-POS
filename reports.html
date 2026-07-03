@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reports - NEEMA POS</title>
+
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+
+<body>
+
+<div class="topbar">
+    <h1>📊 Reports</h1>
+
+    <div style="display:flex;gap:10px;align-items:center;">
+        <span id="staff-name"></span>
+        <button onclick="logout()">Logout</button>
+    </div>
+</div>
+
+<div class="container">
+
+<div class="nav-tabs">
+    <a href="dashboard.html">Dashboard</a>
+    <a href="pos.html">POS</a>
+    <a href="inventory.html">Inventory</a>
+    <a href="staff.html">Staff</a>
+    <a href="reports.html" class="active">Reports</a>
+</div>
+
+<div class="card">
+
+<h2>Sales Reports</h2>
+
+<label>Select Report Date</label>
+
+<input type="date" id="report-date">
+
+<button onclick="loadDailyReport()">
+Generate Report
+</button>
+
+</div>
+
+<div class="grid grid-4">
+
+<div class="stat-card">
+<div class="label">Transactions</div>
+<div class="value" id="total-sales">0</div>
+</div>
+
+<div class="stat-card">
+<div class="label">Revenue</div>
+<div class="value good" id="total-revenue">
+KSh 0
+</div>
+</div>
+
+<div class="stat-card">
+<div class="label">Items Sold</div>
+<div class="value" id="items-sold">0</div>
+</div>
+
+<div class="stat-card">
+<div class="label">Average Sale</div>
+<div class="value" id="average-sale">
+KSh 0
+</div>
+</div>
+
+</div>
+
+<div class="card">
+
+<h2>Sales List</h2>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>Receipt</th>
+
+<th>Cashier</th>
+
+<th>Amount</th>
+
+<th>Payment</th>
+
+<th>Time</th>
+
+</tr>
+
+</thead>
+
+<tbody id="sales-table">
+
+</tbody>
+
+</table>
+
+</div>
+
+</div>
+
+<script src="js/offline-cache.js"></script>
+<script src="js/supabase-config.js"></script>
+<script src="js/reports.js"></script>
