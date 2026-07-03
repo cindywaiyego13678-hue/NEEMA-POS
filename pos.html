@@ -85,6 +85,8 @@
       if (role === 'admin' || role === 'manager') tabs.push({ href: 'inventory.html', label: 'Inventory' });
       if (role === 'admin') tabs.push({ href: 'dashboard.html', label: 'Dashboard' });
       if (role === 'admin') tabs.push({ href: 'staff.html', label: 'Staff' });
+      if (role === 'admin')
+    tabs.push({ href: 'reports.html', label: 'Reports' });
       document.getElementById('nav-tabs').innerHTML = tabs.map(t =>
         `<a href="${t.href}" class="${t.href === 'pos.html' ? 'active' : ''}">${t.label}</a>`
       ).join('');
