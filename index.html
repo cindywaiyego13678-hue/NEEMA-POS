@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login — Appliance Shop POS</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f2137">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="card login-card">
+      <h1>Appliance Shop POS</h1>
+      <p class="sub">Sign in to continue</p>
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="email" placeholder="you@shop.com">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="password" placeholder="••••••••">
+      </div>
+      <button id="login-btn" style="width:100%">Sign In</button>
+      <p class="error-text" id="error-msg" style="display:none;"></p>
+    </div>
+  </div>
+
+  <script src="js/offline-cache.js"></script>
+  <script src="js/supabase-config.js"></script>
+  <script>
+    document.getElementById('login-btn').addEventListener('click', login);
+    document.getElementById('password').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') login();
+    });
+
+    async function login() {
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const errorEl = document.getElementById('error-msg');
+      errorEl.style.display = 'none';
+
+      if (!email || !password) {
+        errorEl.textContent = 'Please enter email and password.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const btn = document.getElementById('login-btn');
+      btn.disabled = true;
+      btn.textContent = 'Signing in...';
+
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+      if (error) {
+        errorEl.textContent = error.message;
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+        return;
+      }
+
+      const staff = await getCurrentStaff();
+      if (!staff) {
+        errorEl.textContent = 'No staff profile found for this account. Contact the admin.';
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+        await supabaseClient.auth.signOut();
+        return;
+      }
+
+      if (staff.role === 'admin') {
+        window.location.href = 'dashboard.html';
+      } else {
+        window.location.href = 'pos.html';
+      }
+    }
+
+    // If already logged in, redirect
+    (async () => {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (session) {
+        const staff = await getCurrentStaff();
+        if (staff) {
+          window.location.href = staff.role === 'admin' ? 'dashboard.html' : 'pos.html';
+        }
+      }
+    })();
+  </script>
+</body>
+</html>

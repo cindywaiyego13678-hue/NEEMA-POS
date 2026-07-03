@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staff — Appliance Shop</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f2137">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <h1>👥 Staff</h1>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span class="role-tag" id="staff-name">...</span>
+      <button class="secondary" onclick="logout()" style="color:#fff; border-color:#3a5169;">Logout</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="nav-tabs" id="nav-tabs"></div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Add New Staff Member</h3>
+        <button onclick="toggleAddForm()" id="toggle-add-btn">+ New Staff</button>
+      </div>
+      <div id="add-staff-form" style="display:none; margin-top:14px;">
+        <div class="grid grid-2">
+          <div class="field"><label>Full name</label><input id="ns-name" placeholder="e.g. Nelly Wanjiru"></div>
+          <div class="field"><label>Email</label><input id="ns-email" type="email" placeholder="nelly@shop.com"></div>
+          <div class="field"><label>Temporary password</label><input id="ns-password" type="text" placeholder="At least 6 characters"></div>
+          <div class="field">
+            <label>Role</label>
+            <select id="ns-role">
+              <option value="cashier">Cashier — POS only</option>
+              <option value="manager">Manager — POS + Inventory</option>
+              <option value="admin">Admin — full access</option>
+            </select>
+          </div>
+        </div>
+        <p style="font-size:0.8rem; color:var(--muted); margin-top:-4px;">Share this password with them directly — they can change it later.</p>
+        <button onclick="addStaff()" id="add-staff-btn">Create Staff Account</button>
+        <p class="error-text" id="add-staff-error" style="display:none;"></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Current Staff</h3>
+      <div id="staff-list"></div>
+    </div>
+  </div>
+
+  <script src="js/offline-cache.js"></script>
+  <script src="js/supabase-config.js"></script>
+  <script>
+    let currentStaff = null;
+    let allStaff = [];
+
+    const STAFF_FUNCTION_URL = 'https://ipbqeyeanlyvklrjcbxl.supabase.co/functions/v1/hyper-handler';
+
+    (async () => {
+      currentStaff = await requireAuth(['admin']);
+      if (!currentStaff) return;
+      document.getElementById('staff-name').textContent = `${currentStaff.full_name} (owner)`;
+      renderNav();
+      await loadStaff();
+    })();
+
+    function renderNav() {
+      document.getElementById('nav-tabs').innerHTML = `
+        <a href="pos.html">POS</a>
+        <a href="inventory.html">Inventory</a>
+        <a href="dashboard.html">Dashboard</a>
+        <a href="staff.html" class="active">Staff</a>
+      `;
+    }
+
+    function toggleAddForm() {
+      const f = document.getElementById('add-staff-form');
+      f.style.display = f.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function loadStaff() {
+      const { data, error } = await supabaseClient.from('staff').select('*').order('full_name');
+      if (error) { console.error(error); return; }
+      allStaff = data;
+      renderStaffList(allStaff);
+    }
+
+    function renderStaffList(staffRows) {
+      const el = document.getElementById('staff-list');
+      if (!staffRows.length) { el.innerHTML = '<div class="empty-state">No staff yet.</div>'; return; }
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Name</th><th>Role</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${staffRows.map(s => `
+              <tr>
+                <td>${escapeHtml(s.full_name)}</td>
+                <td><span class="badge in_stock">${s.role}</span></td>
+                <td>${s.is_active ? '<span class="badge in_stock">active</span>' : '<span class="badge low">inactive</span>'}</td>
+                <td style="display:flex; gap:6px;">
+                  ${s.id !== currentStaff.id ? `
+                    <button class="secondary" style="padding:6px 10px; font-size:0.8rem;" onclick='toggleActive(${JSON.stringify(s.id)}, ${s.is_active})'>${s.is_active ? 'Deactivate' : 'Reactivate'}</button>
+                    <button class="danger" style="padding:6px 10px; font-size:0.8rem;" onclick='deleteStaff(${JSON.stringify(s.id)}, ${JSON.stringify(s.full_name)})'>Delete</button>
+                  ` : '<span style="color:var(--muted); font-size:0.8rem;">You</span>'}
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    async function addStaff() {
+      const errorEl = document.getElementById('add-staff-error');
+      errorEl.style.display = 'none';
+
+      const full_name = document.getElementById('ns-name').value.trim();
+      const email = document.getElementById('ns-email').value.trim();
+      const password = document.getElementById('ns-password').value;
+      const role = document.getElementById('ns-role').value;
+
+      if (!full_name || !email || !password) {
+        errorEl.textContent = 'Please fill in all fields.';
+        errorEl.style.display = 'block';
+        return;
+      }
+      if (password.length < 6) {
+        errorEl.textContent = 'Password must be at least 6 characters.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const btn = document.getElementById('add-staff-btn');
+      btn.disabled = true;
+      btn.textContent = 'Creating...';
+
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch(STAFF_FUNCTION_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({ action: 'create', full_name, email, password, role })
+        });
+        const result = await res.json();
+
+        if (!res.ok) throw new Error(result.error || 'Failed to create staff member');
+
+        alert(`${full_name} was added as ${role}. Share their email and password with them so they can log in.`);
+        document.getElementById('ns-name').value = '';
+        document.getElementById('ns-email').value = '';
+        document.getElementById('ns-password').value = '';
+        toggleAddForm();
+        await loadStaff();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = 'block';
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Create Staff Account';
+    }
+
+    async function toggleActive(staffId, currentlyActive) {
+      const { error } = await supabaseClient
+        .from('staff')
+        .update({ is_active: !currentlyActive })
+        .eq('id', staffId);
+      if (error) { alert('Error: ' + error.message); return; }
+      await loadStaff();
+    }
+
+    async function deleteStaff(staffId, fullName) {
+      if (!confirm(`Permanently delete ${fullName}'s account? This cannot be undone. Their past sales records will be kept, but they will no longer be able to log in.`)) return;
+
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch(STAFF_FUNCTION_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({ action: 'delete', staff_id: staffId })
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || 'Failed to delete staff member');
+        await loadStaff();
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

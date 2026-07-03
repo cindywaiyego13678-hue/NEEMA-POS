@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POS — Appliance Shop</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f2137">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <h1>🛒 Point of Sale</h1>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span id="sync-badge"></span>
+      <span class="role-tag" id="staff-name">...</span>
+      <button class="secondary" onclick="logout()" style="color:#fff; border-color:#3a5169;">Logout</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="nav-tabs" id="nav-tabs"></div>
+
+    <div class="grid" style="grid-template-columns: 1.3fr 1fr;">
+      <div class="card">
+        <div class="field">
+          <label>Search product</label>
+          <input type="text" id="product-search" placeholder="Type name or type...">
+        </div>
+        <div id="product-list" style="max-height:420px; overflow-y:auto;"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;">Current Sale</h3>
+        <div id="cart-items"></div>
+        <div style="border-top:1px solid var(--border); margin-top:10px; padding-top:10px;">
+          <div style="display:flex; justify-content:space-between; font-weight:700; font-size:1.1rem;">
+            <span>Total</span>
+            <span id="cart-total">Ksh 0</span>
+          </div>
+        </div>
+
+        <div class="field" style="margin-top:14px;">
+          <label>Customer name (optional)</label>
+          <input type="text" id="customer-name" placeholder="Walk-in customer">
+        </div>
+        <div class="field">
+          <label>Customer phone (optional)</label>
+          <input type="tel" id="customer-phone" placeholder="07XXXXXXXX">
+        </div>
+        <div class="field">
+          <label>Payment method</label>
+          <select id="payment-method">
+            <option value="mpesa">M-Pesa</option>
+            <option value="cash">Cash</option>
+            <option value="card">Card</option>
+          </select>
+        </div>
+
+        <button id="checkout-btn" style="width:100%;" onclick="checkout()">Complete Sale</button>
+        <p class="error-text" id="checkout-error" style="display:none;"></p>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/offline-cache.js"></script>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/offline-sync.js"></script>
+  <script>
+    let cart = []; // { product, quantity }
+    let allProducts = [];
+    let currentStaff = null;
+
+    (async () => {
+      currentStaff = await requireAuth(['admin','manager','cashier']);
+      if (!currentStaff) return;
+      document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
+      renderNav(currentStaff.role);
+      await loadProducts();
+    })();
+
+    function renderNav(role) {
+      const tabs = [{ href: 'pos.html', label: 'POS' }];
+      if (role === 'admin' || role === 'manager') tabs.push({ href: 'inventory.html', label: 'Inventory' });
+      if (role === 'admin') tabs.push({ href: 'dashboard.html', label: 'Dashboard' });
+      if (role === 'admin') tabs.push({ href: 'staff.html', label: 'Staff' });
+      document.getElementById('nav-tabs').innerHTML = tabs.map(t =>
+        `<a href="${t.href}" class="${t.href === 'pos.html' ? 'active' : ''}">${t.label}</a>`
+      ).join('');
+    }
+
+    async function loadProducts() {
+      if (!navigator.onLine) {
+        const cached = cacheGet('products_list');
+        if (cached) {
+          allProducts = cached.data;
+          showOfflineBanner(cached.cachedAt);
+          renderProductList(allProducts);
+        }
+        return;
+      }
+      const { data, error } = await supabaseClient
+        .from('products')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
+      if (error) {
+        console.error(error);
+        const cached = cacheGet('products_list');
+        if (cached) {
+          allProducts = cached.data;
+          showOfflineBanner(cached.cachedAt);
+          renderProductList(allProducts);
+        }
+        return;
+      }
+      hideOfflineBanner();
+      allProducts = data;
+      cacheSet('products_list', data);
+      renderProductList(allProducts);
+    }
+
+    function renderProductList(products) {
+      const el = document.getElementById('product-list');
+      if (!products.length) { el.innerHTML = '<div class="empty-state">No products found.</div>'; return; }
+      el.innerHTML = products.map(p => `
+        <div class="card" style="margin-bottom:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <strong>${escapeHtml(p.name)}</strong>
+            <div style="font-size:0.8rem; color:var(--muted);">${escapeHtml(p.category || '')} · Ksh ${Number(p.price).toLocaleString()} · ${p.stock_quantity} in stock</div>
+          </div>
+          <button ${p.stock_quantity <= 0 ? 'disabled' : ''} onclick='addToCart(${JSON.stringify(p.id)})'>Add</button>
+        </div>`).join('');
+    }
+
+    document.getElementById('product-search').addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase();
+      renderProductList(allProducts.filter(p =>
+        p.name.toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q)
+      ));
+    });
+
+    function addToCart(productId) {
+      const product = allProducts.find(p => p.id === productId);
+      const existing = cart.find(item => item.product.id === productId);
+      const currentCartQty = existing ? existing.quantity : 0;
+
+      if (currentCartQty + 1 > product.stock_quantity) { alert('Not enough stock available.'); return; }
+
+      if (existing) {
+        existing.quantity += 1;
+      } else {
+        cart.push({ product, quantity: 1 });
+      }
+      renderCart();
+    }
+
+    function changeQuantity(index, delta) {
+      const item = cart[index];
+      const newQty = item.quantity + delta;
+      if (newQty <= 0) { cart.splice(index, 1); renderCart(); return; }
+      if (newQty > item.product.stock_quantity) { alert('Not enough stock available.'); return; }
+      item.quantity = newQty;
+      renderCart();
+    }
+
+    function renderCart() {
+      const el = document.getElementById('cart-items');
+      if (!cart.length) {
+        el.innerHTML = '<div class="empty-state">Cart is empty</div>';
+      } else {
+        el.innerHTML = cart.map((item, i) => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:600; font-size:0.9rem;">${escapeHtml(item.product.name)}</div>
+              <div style="font-size:0.75rem; color:var(--muted);">Ksh ${Number(item.product.price).toLocaleString()} each</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <button class="secondary" style="padding:2px 8px;" onclick="changeQuantity(${i}, -1)">−</button>
+              <span>${item.quantity}</span>
+              <button class="secondary" style="padding:2px 8px;" onclick="changeQuantity(${i}, 1)">+</button>
+            </div>
+          </div>
+        `).join('');
+      }
+      const total = cart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0);
+      document.getElementById('cart-total').textContent = `Ksh ${total.toLocaleString()}`;
+    }
+
+    async function checkout() {
+      const errorEl = document.getElementById('checkout-error');
+      errorEl.style.display = 'none';
+
+      if (!cart.length) {
+        errorEl.textContent = 'Cart is empty.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const btn = document.getElementById('checkout-btn');
+      btn.disabled = true;
+      btn.textContent = 'Processing...';
+
+      const total = cart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0);
+      const paymentMethod = document.getElementById('payment-method').value;
+      const customerName = document.getElementById('customer-name').value.trim() || null;
+      const customerPhone = document.getElementById('customer-phone').value.trim() || null;
+
+      const saleData = {
+        cashier_id: currentStaff.id,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        payment_method: paymentMethod,
+        total_amount: total,
+        status: 'completed',
+        items: cart.map(item => ({
+          product_id: item.product.id,
+          unit_price: item.product.price,
+          quantity: item.quantity
+        }))
+      };
+
+      try {
+        if (!navigator.onLine) throw new Error('offline');
+
+        const { items, ...saleFields } = saleData;
+        const { data: insertedSale, error: saleError } = await supabaseClient
+          .from('sales').insert(saleFields).select().single();
+        if (saleError) throw saleError;
+
+        const itemsToInsert = items.map(it => ({ ...it, sale_id: insertedSale.id }));
+        const { error: itemsError } = await supabaseClient.from('sale_items').insert(itemsToInsert);
+        if (itemsError) throw itemsError;
+
+        for (const it of items) {
+          const product = allProducts.find(p => p.id === it.product_id);
+          const newQty = Math.max(0, product.stock_quantity - it.quantity);
+          await supabaseClient.from('products').update({ stock_quantity: newQty }).eq('id', it.product_id);
+        }
+
+        alert(`Sale completed! Total: Ksh ${total.toLocaleString()}`);
+      } catch (err) {
+        console.warn('Online checkout failed, queueing offline', err);
+        await queueSaleOffline(saleData);
+        alert(`No connection — sale saved offline and will sync automatically. Total: Ksh ${total.toLocaleString()}`);
+        const pending = await getPendingSales();
+        updateSyncBadge(pending.length);
+      }
+
+      cart = [];
+      renderCart();
+      document.getElementById('customer-name').value = '';
+      document.getElementById('customer-phone').value = '';
+      btn.disabled = false;
+      btn.textContent = 'Complete Sale';
+      await loadProducts();
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

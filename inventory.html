@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inventory — Appliance Shop</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f2137">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <h1>📦 Inventory</h1>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span class="role-tag" id="staff-name">...</span>
+      <button class="secondary" onclick="logout()" style="color:#fff; border-color:#3a5169;">Logout</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="nav-tabs" id="nav-tabs"></div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Add New Product</h3>
+        <button onclick="toggleAddForm()" id="toggle-add-btn">+ New Product</button>
+      </div>
+      <div id="add-product-form" style="display:none; margin-top:14px;">
+        <div class="grid grid-2">
+          <div class="field"><label>Name</label><input id="np-name" placeholder="e.g. LG 250L Fridge"></div>
+          <div class="field"><label>Type</label><input id="np-type" placeholder="e.g. Fridges, TVs, Blenders"></div>
+          <div class="field"><label>Stock Number (quantity)</label><input id="np-stock" type="number" min="0" placeholder="e.g. 10"></div>
+          <div class="field"><label>Price (Ksh)</label><input id="np-price" type="number" placeholder="45000"></div>
+        </div>
+        <div class="field">
+          <label>Photo (optional)</label>
+          <input id="np-photo" type="file" accept="image/*">
+        </div>
+        <button onclick="addProduct()" id="save-product-btn">Save Product</button>
+        <p class="error-text" id="add-product-error" style="display:none;"></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Products & Stock</h3>
+      <div class="field">
+        <input type="text" id="inv-search" placeholder="Search products...">
+      </div>
+      <div id="products-table"></div>
+    </div>
+  </div>
+
+  <!-- Edit product modal -->
+  <div id="edit-product-panel" class="card" style="display:none; position:fixed; top:5%; left:50%; transform:translateX(-50%); width:90%; max-width:500px; z-index:50; max-height:85vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="margin:0;">Edit Product</h3>
+      <button class="secondary" onclick="closeEditPanel()">Close</button>
+    </div>
+    <div class="field" style="margin-top:14px;"><label>Name</label><input id="ep-name"></div>
+    <div class="field"><label>Type</label><input id="ep-type"></div>
+    <div class="field"><label>Stock Number (quantity)</label><input id="ep-stock" type="number" min="0"></div>
+    <div class="field"><label>Price (Ksh)</label><input id="ep-price" type="number"></div>
+    <div class="field">
+      <label>Current photo</label>
+      <div id="ep-current-photo" style="margin-bottom:8px;"></div>
+      <label>Replace photo (optional)</label>
+      <input id="ep-photo" type="file" accept="image/*">
+    </div>
+    <button onclick="saveProductEdit()" id="save-edit-btn">Save Changes</button>
+    <p class="error-text" id="edit-product-error" style="display:none;"></p>
+  </div>
+  <div id="edit-panel-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:40;" onclick="closeEditPanel()"></div>
+  <script src="js/supabase-config.js"></script>
+  <script>
+    let currentStaff = null;
+    let allProducts = [];
+
+    (async () => {
+      currentStaff = await requireAuth(['admin','manager']);
+      if (!currentStaff) return;
+      document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
+      renderNav();
+      await loadProducts();
+    })();
+
+    function renderNav() {
+      document.getElementById('nav-tabs').innerHTML = `
+        <a href="pos.html">POS</a>
+        <a href="inventory.html" class="active">Inventory</a>
+        ${currentStaff.role === 'admin' ? '<a href="dashboard.html">Dashboard</a>' : ''}
+        ${currentStaff.role === 'admin' ? '<a href="staff.html">Staff</a>' : ''}
+      `;
+    }
+
+    function toggleAddForm() {
+      const f = document.getElementById('add-product-form');
+      f.style.display = f.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function addProduct() {
+      const errorEl = document.getElementById('add-product-error');
+      errorEl.style.display = 'none';
+
+      const name = document.getElementById('np-name').value.trim();
+      const category = document.getElementById('np-type').value.trim();
+      const stock_quantity = parseInt(document.getElementById('np-stock').value, 10);
+      const price = parseFloat(document.getElementById('np-price').value);
+      const photoFile = document.getElementById('np-photo').files[0];
+
+      if (!name || isNaN(price)) {
+        errorEl.textContent = 'Name and price are required.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const btn = document.getElementById('save-product-btn');
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+
+      let photo_url = null;
+      if (photoFile) {
+        const fileName = `${Date.now()}_${photoFile.name.replace(/\s+/g, '_')}`;
+        const { error: uploadError } = await supabaseClient.storage
+          .from('product-photos').upload(fileName, photoFile);
+        if (uploadError) {
+          errorEl.textContent = 'Photo upload failed: ' + uploadError.message + ' (product not saved — check that the "product-photos" storage bucket exists)';
+          errorEl.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = 'Save Product';
+          return;
+        }
+        const { data: urlData } = supabaseClient.storage.from('product-photos').getPublicUrl(fileName);
+        photo_url = urlData.publicUrl;
+      }
+
+      const { error } = await supabaseClient.from('products').insert({
+        name,
+        category,
+        price,
+        stock_quantity: isNaN(stock_quantity) ? 0 : stock_quantity,
+        reorder_level: 2,
+        is_active: true,
+        photo_url
+      });
+
+      if (error) {
+        errorEl.textContent = 'Error: ' + error.message;
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Save Product';
+        return;
+      }
+
+      document.getElementById('np-name').value = '';
+      document.getElementById('np-type').value = '';
+      document.getElementById('np-stock').value = '';
+      document.getElementById('np-price').value = '';
+      document.getElementById('np-photo').value = '';
+      btn.disabled = false;
+      btn.textContent = 'Save Product';
+      toggleAddForm();
+      await loadProducts();
+    }
+
+    async function loadProducts() {
+      if (!navigator.onLine) {
+        const cached = cacheGet('products_list_full');
+        if (cached) {
+          allProducts = cached.data;
+          showOfflineBanner(cached.cachedAt);
+          renderProducts(allProducts);
+        }
+        return;
+      }
+      const { data, error } = await supabaseClient
+        .from('products')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error(error);
+        const cached = cacheGet('products_list_full');
+        if (cached) {
+          allProducts = cached.data;
+          showOfflineBanner(cached.cachedAt);
+          renderProducts(allProducts);
+        }
+        return;
+      }
+      hideOfflineBanner();
+      allProducts = data;
+      cacheSet('products_list_full', data);
+      renderProducts(allProducts);
+    }
+
+    function renderProducts(products) {
+      const el = document.getElementById('products-table');
+      if (!products.length) { el.innerHTML = '<div class="empty-state">No products yet. Add one above.</div>'; return; }
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Photo</th><th>Product</th><th>Type</th><th>Price</th><th>Stock</th><th>Date Added</th><th></th></tr></thead>
+          <tbody>
+            ${products.map(p => {
+              const low = p.stock_quantity <= (p.reorder_level ?? 2);
+              const dateAdded = p.created_at ? new Date(p.created_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+              const photoCell = p.photo_url
+                ? `<img src="${escapeHtml(p.photo_url)}" style="width:44px; height:44px; object-fit:cover; border-radius:6px;">`
+                : `<div style="width:44px; height:44px; border-radius:6px; background:var(--bg); display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:0.7rem;">—</div>`;
+              return `
+                <tr>
+                  <td>${photoCell}</td>
+                  <td><strong>${escapeHtml(p.name)}</strong></td>
+                  <td>${escapeHtml(p.category || '—')}</td>
+                  <td>Ksh ${Number(p.price).toLocaleString()}</td>
+                  <td><span class="badge ${low ? 'low' : 'in_stock'}">${p.stock_quantity}</span></td>
+                  <td style="font-size:0.8rem; color:var(--muted);">${dateAdded}</td>
+                  <td>
+                    <button class="secondary" style="padding:6px 10px; font-size:0.8rem;" onclick='editProduct(${JSON.stringify(p.id)})'>Edit</button>
+                    <button class="secondary" style="padding:6px 10px; font-size:0.8rem;" onclick='adjustStock(${JSON.stringify(p.id)})'>Adjust Stock</button>
+                    <button class="danger" style="padding:6px 10px; font-size:0.8rem;" onclick='deleteProduct(${JSON.stringify(p.id)}, ${JSON.stringify(p.name)})'>Delete</button>
+                  </td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    document.getElementById('inv-search').addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase();
+      renderProducts(allProducts.filter(p =>
+        p.name.toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q)
+      ));
+    });
+
+    async function adjustStock(productId) {
+      const product = allProducts.find(p => p.id === productId);
+      const input = prompt(`Current stock for "${product.name}": ${product.stock_quantity}\n\nEnter new stock quantity:`, product.stock_quantity);
+      if (input === null) return;
+      const newQty = parseInt(input, 10);
+      if (isNaN(newQty) || newQty < 0) { alert('Please enter a valid number.'); return; }
+
+      const { error } = await supabaseClient
+        .from('products')
+        .update({ stock_quantity: newQty })
+        .eq('id', productId);
+      if (error) { alert('Error: ' + error.message); return; }
+      await loadProducts();
+    }
+
+    async function deleteProduct(productId, productName) {
+      if (!confirm(`Delete "${productName}" permanently? This cannot be undone.`)) return;
+      const { error } = await supabaseClient.from('products').delete().eq('id', productId);
+      if (error) { alert('Error: ' + error.message); return; }
+      await loadProducts();
+    }
+
+    let editingProductId = null;
+
+    function editProduct(productId) {
+      const product = allProducts.find(p => p.id === productId);
+      editingProductId = productId;
+
+      document.getElementById('ep-name').value = product.name || '';
+      document.getElementById('ep-type').value = product.category || '';
+      document.getElementById('ep-stock').value = product.stock_quantity ?? 0;
+      document.getElementById('ep-price').value = product.price ?? '';
+      document.getElementById('ep-photo').value = '';
+      document.getElementById('ep-current-photo').innerHTML = product.photo_url
+        ? `<img src="${escapeHtml(product.photo_url)}" style="width:80px; height:80px; object-fit:cover; border-radius:8px;">`
+        : `<span style="color:var(--muted); font-size:0.85rem;">No photo yet</span>`;
+      document.getElementById('edit-product-error').style.display = 'none';
+
+      document.getElementById('edit-product-panel').style.display = 'block';
+      document.getElementById('edit-panel-overlay').style.display = 'block';
+    }
+
+    function closeEditPanel() {
+      document.getElementById('edit-product-panel').style.display = 'none';
+      document.getElementById('edit-panel-overlay').style.display = 'none';
+      editingProductId = null;
+    }
+
+    async function saveProductEdit() {
+      const errorEl = document.getElementById('edit-product-error');
+      errorEl.style.display = 'none';
+
+      const name = document.getElementById('ep-name').value.trim();
+      const category = document.getElementById('ep-type').value.trim();
+      const stock_quantity = parseInt(document.getElementById('ep-stock').value, 10);
+      const price = parseFloat(document.getElementById('ep-price').value);
+      const photoFile = document.getElementById('ep-photo').files[0];
+
+      if (!name || isNaN(price)) {
+        errorEl.textContent = 'Name and price are required.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const btn = document.getElementById('save-edit-btn');
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+
+      const updates = {
+        name, category, price,
+        stock_quantity: isNaN(stock_quantity) ? 0 : stock_quantity
+      };
+
+      if (photoFile) {
+        const fileName = `${Date.now()}_${photoFile.name.replace(/\s+/g, '_')}`;
+        const { error: uploadError } = await supabaseClient.storage
+          .from('product-photos').upload(fileName, photoFile);
+        if (uploadError) {
+          errorEl.textContent = 'Photo upload failed: ' + uploadError.message;
+          errorEl.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = 'Save Changes';
+          return;
+        }
+        const { data: urlData } = supabaseClient.storage.from('product-photos').getPublicUrl(fileName);
+        updates.photo_url = urlData.publicUrl;
+      }
+
+      const { error } = await supabaseClient.from('products').update(updates).eq('id', editingProductId);
+
+      btn.disabled = false;
+      btn.textContent = 'Save Changes';
+
+      if (error) {
+        errorEl.textContent = 'Error: ' + error.message;
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      closeEditPanel();
+      await loadProducts();
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
