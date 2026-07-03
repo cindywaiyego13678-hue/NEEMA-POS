@@ -114,14 +114,15 @@ function hideOfflineBanner() {}
       renderNav();
       await loadProducts();
     })();
-
-    function renderNav() {
-      document.getElementById('nav-tabs').innerHTML = `
+function renderNav() {
+    document.getElementById('nav-tabs').innerHTML = `
         <a href="pos.html">POS</a>
         <a href="inventory.html" class="active">Inventory</a>
-        ${currentStaff.role === 'admin' ? '<a href="dashboard.html">Dashboard</a>' : ''}
-        ${currentStaff.role === 'admin' ? '<a href="staff.html">Staff</a>' : ''}
-      `;
+        <a href="dashboard.html">Dashboard</a>
+        <a href="staff.html">Staff</a>
+        <a href="reports.html">Reports</a>
+    `;
+    
     }
 
     function toggleAddForm() {
