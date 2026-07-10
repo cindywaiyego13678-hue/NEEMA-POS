@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Store → Shop — Appliance Shop</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f2137">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .store-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  @media (max-width: 768px) {
+    .store-layout { grid-template-columns: 1fr; }
+  }
+  .transfer-item-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    font-size: 0.9rem;
+    gap: 10px;
+  }
+  .transfer-item-row:last-child { border-bottom: none; }
+  .transfer-item-name { flex: 1; font-weight: 600; }
+  .transfer-item-meta { color: var(--muted, #6b7280); font-size: 0.8rem; }
+  .transfer-qty-input {
+    width: 70px;
+    padding: 4px 8px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 6px;
+    font-size: 0.9rem;
+  }
+  .transfer-items-box {
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-height: 80px;
+    max-height: 220px;
+    overflow-y: auto;
+    margin: 10px 0;
+    background: var(--bg, #f8fafc);
+  }
+  .empty-transfer {
+    text-align: center;
+    color: var(--muted, #6b7280);
+    padding: 20px 0;
+    font-size: 0.9rem;
+  }
+  .store-qty-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+  .store-qty-ok { background: #d1fae5; color: #065f46; }
+  .store-qty-low { background: #fef3c7; color: #92400e; }
+  .store-qty-zero { background: #fee2e2; color: #991b1b; }
+  .summary-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .summary-box {
+    flex: 1;
+    min-width: 120px;
+    background: var(--bg, #f8fafc);
+    border-radius: 10px;
+    padding: 12px 16px;
+    text-align: center;
+  }
+  .summary-box .label { font-size: 0.78rem; color: var(--muted, #6b7280); }
+  .summary-box .value { font-size: 1.4rem; font-weight: 800; margin-top: 2px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>🏪 Store → Shop</h1>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span class="role-tag" id="staff-name">...</span>
+      <button class="secondary" onclick="logout()" style="color:#fff; border-color:#3a5169;">Logout</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="nav-tabs" id="nav-tabs"></div>
+
+    <!-- Summary row -->
+    <div class="summary-row" id="summary-row">
+      <div class="summary-box">
+        <div class="label">Products in Store</div>
+        <div class="value" id="sum-products">—</div>
+      </div>
+      <div class="summary-box">
+        <div class="label">Transfers Today</div>
+        <div class="value" id="sum-today">—</div>
+      </div>
+      <div class="summary-box">
+        <div class="label">Out of Stock in Store</div>
+        <div class="value" id="sum-zero" style="color:#dc2626;">—</div>
+      </div>
+    </div>
+
+    <div class="store-layout">
+
+      <!-- LEFT: Store (warehouse) stock -->
+      <div>
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h3 style="margin:0;">🏪 Store Stock</h3>
+            <button onclick="openRestockModal()" id="restock-btn">+ Restock Store</button>
+          </div>
+          <div class="field">
+            <input type="text" id="store-search" placeholder="Search products...">
+          </div>
+          <div id="store-table">
+            <div class="empty-state">Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: New transfer + history -->
+      <div>
+
+        <!-- New Transfer -->
+        <div class="card" style="margin-bottom:18px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0;">📦 Transfer to Shop</h3>
+            <button class="secondary" onclick="clearTransfer()" style="font-size:0.8rem; padding:5px 10px;">Clear</button>
+          </div>
+
+          <div class="field">
+            <label>Select product</label>
+            <select id="product-select">
+              <option value="">— choose a product —</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:10px; align-items:flex-end;">
+            <div class="field" style="flex:1; margin:0;">
+              <label>Quantity to transfer</label>
+              <input type="number" id="transfer-qty" min="0.01" step="any" placeholder="e.g. 5">
+            </div>
+            <button onclick="addTransferItem()" style="margin-bottom:0; white-space:nowrap;">Add Item</button>
+          </div>
+
+          <div class="transfer-items-box" id="transfer-items-box">
+            <div class="empty-transfer">No items added yet.</div>
+          </div>
+
+          <div class="field">
+            <label>Notes (optional)</label>
+            <input type="text" id="transfer-notes" placeholder="e.g. Morning restock — Friday">
+          </div>
+
+          <button onclick="submitTransfer()" id="submit-transfer-btn" style="width:100%; margin-top:4px;">
+            ✅ Record Transfer to Shop
+          </button>
+          <p class="error-text" id="transfer-error" style="display:none;"></p>
+        </div>
+
+        <!-- Transfer History -->
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0;">📋 Transfer History</h3>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input type="date" id="hist-from" style="padding:5px 8px; border:1px solid var(--border,#e2e8f0); border-radius:6px; font-size:0.82rem;">
+              <span style="color:var(--muted);">to</span>
+              <input type="date" id="hist-to" style="padding:5px 8px; border:1px solid var(--border,#e2e8f0); border-radius:6px; font-size:0.82rem;">
+              <button class="secondary" onclick="loadHistory()" style="padding:5px 10px; font-size:0.82rem;">Filter</button>
+            </div>
+          </div>
+          <div id="history-table">
+            <div class="empty-state">Loading...</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Restock Store Modal -->
+  <div id="restock-modal" class="card" style="display:none; position:fixed; top:10%; left:50%; transform:translateX(-50%); width:90%; max-width:440px; z-index:50; max-height:80vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h3 style="margin:0;">+ Restock Store</h3>
+      <button class="secondary" onclick="closeRestockModal()">Close</button>
+    </div>
+    <p style="color:var(--muted); font-size:0.88rem; margin-top:-8px;">
+      Use this when the owner buys new goods and brings them to the store/warehouse.
+    </p>
+    <div class="field">
+      <label>Product</label>
+      <select id="rs-product">
+        <option value="">— choose a product —</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Quantity received at store</label>
+      <input type="number" id="rs-qty" min="0.01" step="any" placeholder="e.g. 20">
+    </div>
+    <div class="field">
+      <label>Notes (optional)</label>
+      <input type="text" id="rs-notes" placeholder="e.g. Bought from supplier — Gikomba">
+    </div>
+    <button onclick="submitRestock()" id="rs-btn">Add to Store</button>
+    <p class="error-text" id="rs-error" style="display:none;"></p>
+  </div>
+  <div id="restock-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:40;" onclick="closeRestockModal()"></div>
+
+  <script>
+    const CACHE_PREFIX = 'appliance_pos_cache_';
+    function cacheSet(key, data) {
+      try { localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ data, cachedAt: new Date().toISOString() })); } catch(e) {}
+    }
+    function cacheGet(key) {
+      try { const r = localStorage.getItem(CACHE_PREFIX + key); return r ? JSON.parse(r) : null; } catch(e) { return null; }
+    }
+  </script>
+
+  <script src="js/supabase-config.js"></script>
+
+  <script>
+    let currentStaff = null;
+    let allProducts   = [];   // all shop products (for dropdowns)
+    let storeRows     = [];   // store_inventory joined with products
+    let transferItems = [];   // items being built for the current transfer
+
+    // ─── INIT ────────────────────────────────────────────────────────────────
+    (async () => {
+      currentStaff = await requireAuth(['admin', 'manager']);
+      if (!currentStaff) return;
+      document.getElementById('staff-name').textContent =
+        `${currentStaff.full_name} (${currentStaff.role})`;
+      renderNav();
+      setDefaultDates();
+      await Promise.all([loadProducts(), loadStoreInventory(), loadHistory()]);
+      updateSummary();
+    })();
+
+    function renderNav() {
+      document.getElementById('nav-tabs').innerHTML = `
+        <a href="pos.html">POS</a>
+        <a href="inventory.html">Inventory</a>
+        <a href="store.html" class="active">Store → Shop</a>
+        <a href="dashboard.html">Dashboard</a>
+        <a href="staff.html">Staff</a>
+        <a href="reports.html">Reports</a>
+      `;
+    }
+
+    function setDefaultDates() {
+      const today   = new Date().toISOString().slice(0, 10);
+      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+      document.getElementById('hist-from').value = weekAgo;
+      document.getElementById('hist-to').value   = today;
+    }
+
+    // ─── PRODUCTS (for dropdowns) ─────────────────────────────────────────────
+    async function loadProducts() {
+      const { data, error } = await supabaseClient
+        .from('products')
+        .select('id, name, category, stock_quantity, reorder_level')
+        .eq('is_active', true)
+        .order('name');
+      if (error) { console.error(error); return; }
+      allProducts = data || [];
+      populateDropdowns();
+    }
+
+    function populateDropdowns() {
+      const opts = allProducts.map(p =>
+        `<option value="${p.id}" data-name="${escapeAttr(p.name)}">${escapeHtml(p.name)}</option>`
+      ).join('');
+      document.getElementById('product-select').innerHTML =
+        `<option value="">— choose a product —</option>` + opts;
+      document.getElementById('rs-product').innerHTML =
+        `<option value="">— choose a product —</option>` + opts;
+    }
+
+    // ─── STORE INVENTORY TABLE ────────────────────────────────────────────────
+    async function loadStoreInventory() {
+      const { data, error } = await supabaseClient
+        .from('store_inventory')
+        .select('*, products(id, name, category, reorder_level)')
+        .order('products(name)');
+
+      if (error) { console.error(error); return; }
+      storeRows = data || [];
+      renderStoreTable(storeRows);
+    }
+
+    document.addEventListener('input', (e) => {
+      if (e.target.id === 'store-search') {
+        const q = e.target.value.toLowerCase();
+        renderStoreTable(
+          storeRows.filter(r => r.products?.name?.toLowerCase().includes(q))
+        );
+      }
+    });
+
+    function renderStoreTable(rows) {
+      const el = document.getElementById('store-table');
+      if (!rows.length) {
+        el.innerHTML = `<div class="empty-state">No products in store yet. Click "+ Restock Store" to add stock.</div>`;
+        return;
+      }
+      el.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Type</th>
+              <th>Store Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => {
+              const p = r.products || {};
+              const qty = r.quantity || 0;
+              const low = p.reorder_level ?? 2;
+              const badgeClass = qty === 0 ? 'store-qty-zero' : qty <= low ? 'store-qty-low' : 'store-qty-ok';
+              return `
+                <tr>
+                  <td><strong>${escapeHtml(p.name || '—')}</strong></td>
+                  <td style="color:var(--muted); font-size:0.85rem;">${escapeHtml(p.category || '—')}</td>
+                  <td><span class="store-qty-badge ${badgeClass}">${qty}</span></td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    function updateSummary() {
+      document.getElementById('sum-products').textContent = storeRows.length;
+      document.getElementById('sum-zero').textContent =
+        storeRows.filter(r => (r.quantity || 0) === 0).length;
+    }
+
+    // ─── RESTOCK STORE ────────────────────────────────────────────────────────
+    function openRestockModal() {
+      document.getElementById('rs-qty').value = '';
+      document.getElementById('rs-notes').value = '';
+      document.getElementById('rs-product').value = '';
+      document.getElementById('rs-error').style.display = 'none';
+      document.getElementById('restock-modal').style.display = 'block';
+      document.getElementById('restock-overlay').style.display = 'block';
+    }
+
+    function closeRestockModal() {
+      document.getElementById('restock-modal').style.display = 'none';
+      document.getElementById('restock-overlay').style.display = 'none';
+    }
+
+    async function submitRestock() {
+      const errorEl = document.getElementById('rs-error');
+      errorEl.style.display = 'none';
+
+      const productId = document.getElementById('rs-product').value;
+      const qty       = parseFloat(document.getElementById('rs-qty').value);
+      const notes     = document.getElementById('rs-notes').value.trim();
+
+      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
+      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
+
+      const btn = document.getElementById('rs-btn');
+      btn.disabled = true; btn.textContent = 'Saving...';
+
+      const { error } = await supabaseClient.rpc('restock_store', {
+        p_product_id: productId,
+        p_quantity:   qty,
+        p_notes:      notes || 'Store restock'
+      });
+
+      btn.disabled = false; btn.textContent = 'Add to Store';
+
+      if (error) {
+        errorEl.textContent = 'Error: ' + error.message;
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      closeRestockModal();
+      await loadStoreInventory();
+      updateSummary();
+      alert('✅ Store restocked successfully!');
+    }
+
+    // ─── TRANSFER FORM ────────────────────────────────────────────────────────
+    function addTransferItem() {
+      const select    = document.getElementById('product-select');
+      const productId = select.value;
+      const qty       = parseFloat(document.getElementById('transfer-qty').value);
+      const errorEl   = document.getElementById('transfer-error');
+      errorEl.style.display = 'none';
+
+      if (!productId) {
+        errorEl.textContent = 'Please select a product.';
+        errorEl.style.display = 'block'; return;
+      }
+      if (!qty || qty <= 0) {
+        errorEl.textContent = 'Please enter a valid quantity.';
+        errorEl.style.display = 'block'; return;
+      }
+
+      // Check store has this product
+      const storeRow = storeRows.find(r => r.product_id === productId);
+      if (!storeRow) {
+        errorEl.textContent = 'This product has no store stock. Restock the store first.';
+        errorEl.style.display = 'block'; return;
+      }
+
+      // Check available quantity
+      const existing    = transferItems.find(i => i.product_id === productId);
+      const alreadyQty  = existing ? existing.quantity : 0;
+      if (alreadyQty + qty > storeRow.quantity) {
+        errorEl.textContent =
+          `Store only has ${storeRow.quantity} unit(s) of "${storeRow.products?.name}". ` +
+          `You've already added ${alreadyQty}.`;
+        errorEl.style.display = 'block'; return;
+      }
+
+      const productName = select.options[select.selectedIndex].dataset.name ||
+                          select.options[select.selectedIndex].text;
+
+      if (existing) {
+        existing.quantity += qty;
+        existing.store_qty = storeRow.quantity;
+      } else {
+        transferItems.push({
+          product_id:   productId,
+          product_name: productName,
+          quantity:     qty,
+          store_qty:    storeRow.quantity
+        });
+      }
+
+      // Reset pickers
+      select.value = '';
+      document.getElementById('transfer-qty').value = '';
+      renderTransferItems();
+    }
+
+    function renderTransferItems() {
+      const box = document.getElementById('transfer-items-box');
+      if (!transferItems.length) {
+        box.innerHTML = '<div class="empty-transfer">No items added yet.</div>';
+        return;
+      }
+      box.innerHTML = transferItems.map((item, idx) => `
+        <div class="transfer-item-row">
+          <div style="flex:1;">
+            <div class="transfer-item-name">${escapeHtml(item.product_name)}</div>
+            <div class="transfer-item-meta">Store stock: ${item.store_qty}</div>
+          </div>
+          <input
+            class="transfer-qty-input"
+            type="number" min="0.01" step="any"
+            value="${item.quantity}"
+            onchange="updateItemQty(${idx}, this.value)"
+          >
+          <button
+            class="secondary danger"
+            style="padding:4px 8px; font-size:0.78rem; margin:0;"
+            onclick="removeTransferItem(${idx})"
+          >✕</button>
+        </div>`).join('');
+    }
+
+    function updateItemQty(idx, rawVal) {
+      const errorEl = document.getElementById('transfer-error');
+      errorEl.style.display = 'none';
+      const qty = parseFloat(rawVal);
+      if (!qty || qty <= 0) { removeTransferItem(idx); return; }
+      if (qty > transferItems[idx].store_qty) {
+        errorEl.textContent =
+          `Store only has ${transferItems[idx].store_qty} unit(s) of "${transferItems[idx].product_name}".`;
+        errorEl.style.display = 'block';
+        return;
+      }
+      transferItems[idx].quantity = qty;
+    }
+
+    function removeTransferItem(idx) {
+      transferItems.splice(idx, 1);
+      renderTransferItems();
+    }
+
+    function clearTransfer() {
+      transferItems = [];
+      document.getElementById('transfer-notes').value = '';
+      document.getElementById('transfer-error').style.display = 'none';
+      renderTransferItems();
+    }
+
+    async function submitTransfer() {
+      const errorEl = document.getElementById('transfer-error');
+      errorEl.style.display = 'none';
+
+      if (!transferItems.length) {
+        errorEl.textContent = 'Add at least one item before recording a transfer.';
+        errorEl.style.display = 'block'; return;
+      }
+
+      const notes = document.getElementById('transfer-notes').value.trim();
+      const btn   = document.getElementById('submit-transfer-btn');
+      btn.disabled = true; btn.textContent = 'Saving...';
+
+      const items = transferItems.map(i => ({
+        product_id:   i.product_id,
+        product_name: i.product_name,
+        quantity:     i.quantity
+      }));
+
+      const { error } = await supabaseClient.rpc('record_transfer', {
+        p_staff_id: currentStaff.id,
+        p_notes:    notes || null,
+        p_items:    items
+      });
+
+      btn.disabled = false; btn.textContent = '✅ Record Transfer to Shop';
+
+      if (error) {
+        errorEl.textContent = 'Transfer failed: ' + error.message;
+        errorEl.style.display = 'block'; return;
+      }
+
+      clearTransfer();
+      await Promise.all([loadStoreInventory(), loadHistory()]);
+      updateSummary();
+      alert(`✅ Transfer recorded! ${items.length} product(s) moved to shop stock.`);
+    }
+
+    // ─── TRANSFER HISTORY ─────────────────────────────────────────────────────
+    async function loadHistory() {
+      const from = document.getElementById('hist-from').value;
+      const to   = document.getElementById('hist-to').value;
+
+      let query = supabaseClient
+        .from('stock_transfers')
+        .select('*, staff(full_name), stock_transfer_items(product_name, quantity)')
+        .order('created_at', { ascending: false });
+
+      if (from) query = query.gte('created_at', from + 'T00:00:00');
+      if (to)   query = query.lte('created_at', to   + 'T23:59:59');
+
+      const { data, error } = await query;
+
+      // Update "today" summary counter
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const todayCount = (data || []).filter(t =>
+        t.created_at?.slice(0, 10) === todayStr
+      ).length;
+      const sumToday = document.getElementById('sum-today');
+      if (sumToday) sumToday.textContent = todayCount;
+
+      const el = document.getElementById('history-table');
+      if (error) { el.innerHTML = `<div class="empty-state">Failed to load history.</div>`; return; }
+      if (!data || !data.length) {
+        el.innerHTML = `<div class="empty-state">No transfers in this period.</div>`;
+        return;
+      }
+
+      el.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Date & Time</th>
+              <th>Recorded By</th>
+              <th>Items Transferred</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.map(t => {
+              const dateStr = new Date(t.created_at).toLocaleString('en-KE', {
+                day:'numeric', month:'short', year:'numeric',
+                hour:'2-digit', minute:'2-digit'
+              });
+              const itemsSummary = (t.stock_transfer_items || [])
+                .map(i => `${i.quantity} × ${escapeHtml(i.product_name)}`)
+                .join('<br>');
+              return `
+                <tr>
+                  <td style="font-size:0.85rem; white-space:nowrap;">${dateStr}</td>
+                  <td>${escapeHtml(t.staff?.full_name || '—')}</td>
+                  <td style="font-size:0.85rem;">${itemsSummary || '—'}</td>
+                  <td style="font-size:0.85rem; color:var(--muted);">${escapeHtml(t.notes || '—')}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    // ─── UTILS ────────────────────────────────────────────────────────────────
+    function escapeHtml(str) {
+      const d = document.createElement('div');
+      d.textContent = str ?? '';
+      return d.innerHTML;
+    }
+    function escapeAttr(str) {
+      return (str ?? '').replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>
