@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,31 +15,91 @@
     <div class="card login-card">
       <h1>Appliance Shop POS</h1>
       <p class="sub">Sign in to continue</p>
-      <div class="field">
-        <label>Email</label>
-        <input type="email" id="email" placeholder="you@shop.com">
+
+      <!-- LOGIN FORM -->
+      <div id="login-form">
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="email" placeholder="you@shop.com">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="password" placeholder="••••••••">
+        </div>
+        <button id="login-btn" style="width:100%">Sign In</button>
+        <p class="error-text" id="error-msg" style="display:none;"></p>
+
+        <!-- shown only if no admin exists -->
+        <div id="setup-section" style="display:none; margin-top:20px; border-top:1px solid #e2e8f0; padding-top:16px; text-align:center;">
+          <p style="color:#6b7280; font-size:0.9rem; margin-bottom:10px;">No owner account yet?</p>
+          <button id="show-create-btn" style="width:100%; background:#1a7a4a;">Create Owner Account</button>
+        </div>
       </div>
-      <div class="field">
-        <label>Password</label>
-        <input type="password" id="password" placeholder="••••••••">
+
+      <!-- CREATE OWNER FORM (hidden by default) -->
+      <div id="create-form" style="display:none;">
+        <h3 style="margin-top:0;">Create Owner Account</h3>
+        <p style="color:#6b7280; font-size:0.85rem; margin-top:-8px;">This is a one-time setup. Once created, this option disappears.</p>
+        <div class="field">
+          <label>Full Name</label>
+          <input type="text" id="create-name" placeholder="e.g. John Thuku">
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="create-email" placeholder="owner@shop.com">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="create-password" placeholder="Min 6 characters">
+        </div>
+        <button id="create-btn" style="width:100%; background:#1a7a4a;">Create Owner Account</button>
+        <button id="back-btn" class="secondary" style="width:100%; margin-top:8px;">Back to Login</button>
+        <p class="error-text" id="create-error" style="display:none;"></p>
       </div>
-      <button id="login-btn" style="width:100%">Sign In</button>
-      <p class="error-text" id="error-msg" style="display:none;"></p>
+
     </div>
   </div>
 
   <script src="js/offline-cache.js"></script>
   <script src="js/supabase-config.js"></script>
   <script>
+    // ── CHECK IF ADMIN EXISTS ──────────────────────────────────────────────
+    // On page load, check if any admin exists.
+    // If none, show the "Create Owner Account" button.
+    (async () => {
+      // If already logged in, redirect immediately
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (session) {
+        const staff = await getCurrentStaff();
+        if (staff) {
+          window.location.href = staff.role === 'admin' ? 'dashboard.html' : 'pos.html';
+          return;
+        }
+      }
+
+      // Check if any admin exists in the staff table
+      const { data, error } = await supabaseClient
+        .from('staff')
+        .select('id')
+        .eq('role', 'admin')
+        .limit(1);
+
+      if (!error && (!data || data.length === 0)) {
+        // No admin exists — show setup button
+        document.getElementById('setup-section').style.display = 'block';
+      }
+    })();
+
+    // ── LOGIN ──────────────────────────────────────────────────────────────
     document.getElementById('login-btn').addEventListener('click', login);
     document.getElementById('password').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') login();
     });
 
     async function login() {
-      const email = document.getElementById('email').value.trim();
+      const email    = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value;
-      const errorEl = document.getElementById('error-msg');
+      const errorEl  = document.getElementById('error-msg');
       errorEl.style.display = 'none';
 
       if (!email || !password) {
@@ -52,7 +113,6 @@
       btn.textContent = 'Signing in...';
 
       const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-
       if (error) {
         errorEl.textContent = error.message;
         errorEl.style.display = 'block';
@@ -63,7 +123,7 @@
 
       const staff = await getCurrentStaff();
       if (!staff) {
-        errorEl.textContent = 'No staff profile found for this account. Contact the admin.';
+        errorEl.textContent = 'No staff profile found. Contact the admin.';
         errorEl.style.display = 'block';
         btn.disabled = false;
         btn.textContent = 'Sign In';
@@ -71,23 +131,75 @@
         return;
       }
 
-      if (staff.role === 'admin') {
-        window.location.href = 'dashboard.html';
-      } else {
-        window.location.href = 'pos.html';
-      }
+      window.location.href = staff.role === 'admin' ? 'dashboard.html' : 'pos.html';
     }
 
-    // If already logged in, redirect
-    (async () => {
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      if (session) {
-        const staff = await getCurrentStaff();
-        if (staff) {
-          window.location.href = staff.role === 'admin' ? 'dashboard.html' : 'pos.html';
-        }
+    // ── SHOW / HIDE CREATE FORM ────────────────────────────────────────────
+    document.getElementById('show-create-btn').addEventListener('click', () => {
+      document.getElementById('login-form').style.display  = 'none';
+      document.getElementById('create-form').style.display = 'block';
+    });
+
+    document.getElementById('back-btn').addEventListener('click', () => {
+      document.getElementById('create-form').style.display = 'none';
+      document.getElementById('login-form').style.display  = 'block';
+    });
+
+    // ── CREATE OWNER ACCOUNT ───────────────────────────────────────────────
+    document.getElementById('create-btn').addEventListener('click', createOwner);
+
+    async function createOwner() {
+      const name     = document.getElementById('create-name').value.trim();
+      const email    = document.getElementById('create-email').value.trim();
+      const password = document.getElementById('create-password').value;
+      const errorEl  = document.getElementById('create-error');
+      errorEl.style.display = 'none';
+
+      if (!name || !email || !password) {
+        errorEl.textContent = 'Please fill in all fields.';
+        errorEl.style.display = 'block';
+        return;
       }
-    })();
+      if (password.length < 6) {
+        errorEl.textContent = 'Password must be at least 6 characters.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const btn = document.getElementById('create-btn');
+      btn.disabled = true;
+      btn.textContent = 'Creating...';
+
+      // 1. Create auth user
+      const { data, error } = await supabaseClient.auth.signUp({ email, password });
+      if (error) {
+        errorEl.textContent = error.message;
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Create Owner Account';
+        return;
+      }
+
+      // 2. Insert into staff table as admin
+      const { error: staffError } = await supabaseClient.from('staff').insert({
+        id:        data.user.id,
+        full_name: name,
+        role:      'admin',
+        is_active: true
+      });
+
+      if (staffError) {
+        errorEl.textContent = 'Account created but profile failed: ' + staffError.message;
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Create Owner Account';
+        return;
+      }
+
+      // 3. Auto login
+      await supabaseClient.auth.signInWithPassword({ email, password });
+      window.location.href = 'dashboard.html';
+    }
   </script>
 </body>
 </html>
