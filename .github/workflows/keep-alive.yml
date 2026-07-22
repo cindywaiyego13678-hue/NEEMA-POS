@@ -11,9 +11,10 @@ jobs:
   ping-supabase:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase (lightweight read request)
+      - name: Ping Supabase (any request counts as activity)
         run: |
-          curl --silent --show-error --fail \
-            "${{ secrets.SUPABASE_URL }}/rest/v1/staff?select=id&limit=1" \
+          curl --silent --show-error \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/" \
             -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
+          echo "Ping sent (any response, including 401/403, still counts as activity and prevents the pause)."
