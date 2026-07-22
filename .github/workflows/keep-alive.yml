@@ -1,0 +1,19 @@
+name: Keep Supabase Project Active
+
+# Runs every 3 days, plus lets you trigger it manually anytime
+# from the Actions tab if you want to test it immediately.
+on:
+  schedule:
+    - cron: '0 6 */3 * *'   # 6:00 AM UTC, every 3 days
+  workflow_dispatch:
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase (lightweight read request)
+        run: |
+          curl --silent --show-error --fail \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/staff?select=id&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
