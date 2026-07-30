@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Inventory — Appliance Shop</title>
+<title>Inventory — Thuku Enterprise</title>
 <link rel="stylesheet" href="css/style.css">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0f2137">
@@ -28,10 +28,18 @@
       </div>
       <div id="add-product-form" style="display:none; margin-top:14px;">
         <div class="grid grid-2">
-          <div class="field"><label>Name</label><input id="np-name" placeholder="e.g. LG 250L Fridge"></div>
-          <div class="field"><label>Type</label><input id="np-type" placeholder="e.g. Fridges, TVs, Blenders"></div>
+          <div class="field">
+            <label>Department</label>
+            <select id="np-department">
+              <option value="Household Items">Household Items</option>
+              <option value="Clothes & Shoes">Clothes &amp; Shoes</option>
+            </select>
+          </div>
+          <div class="field"><label>Type</label><input id="np-type" placeholder="e.g. Cookware, Dresses, Sneakers"></div>
+          <div class="field"><label>Name</label><input id="np-name" placeholder="e.g. Non-stick Frying Pan 28cm"></div>
           <div class="field"><label>Stock Number (quantity)</label><input id="np-stock" type="number" min="0" placeholder="e.g. 10"></div>
-          <div class="field"><label>Price (Ksh)</label><input id="np-price" type="number" placeholder="45000"></div>
+          <div class="field"><label>Cost Price (Ksh)</label><input id="np-cost" type="number" placeholder="e.g. 1200"></div>
+          <div class="field"><label>Selling Price (Ksh)</label><input id="np-price" type="number" placeholder="e.g. 1800"></div>
         </div>
         <div class="field">
           <label>Photo (optional)</label>
@@ -57,10 +65,18 @@
       <h3 style="margin:0;">Edit Product</h3>
       <button class="secondary" onclick="closeEditPanel()">Close</button>
     </div>
-    <div class="field" style="margin-top:14px;"><label>Name</label><input id="ep-name"></div>
+    <div class="field" style="margin-top:14px;">
+      <label>Department</label>
+      <select id="ep-department">
+        <option value="Household Items">Household Items</option>
+        <option value="Clothes & Shoes">Clothes &amp; Shoes</option>
+      </select>
+    </div>
+    <div class="field"><label>Name</label><input id="ep-name"></div>
     <div class="field"><label>Type</label><input id="ep-type"></div>
     <div class="field"><label>Stock Number (quantity)</label><input id="ep-stock" type="number" min="0"></div>
-    <div class="field"><label>Price (Ksh)</label><input id="ep-price" type="number"></div>
+    <div class="field"><label>Cost Price (Ksh)</label><input id="ep-cost" type="number"></div>
+    <div class="field"><label>Selling Price (Ksh)</label><input id="ep-price" type="number"></div>
     <div class="field">
       <label>Current photo</label>
       <div id="ep-current-photo" style="margin-bottom:8px;"></div>
@@ -107,7 +123,7 @@ function hideOfflineBanner() {}
     let allProducts = [];
 
     (async () => {
-      currentStaff = await requireAuth(['admin','manager']);
+      currentStaff = await requireAuth(['admin']);
       if (!currentStaff) return;
       document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
       renderNav();
@@ -117,7 +133,6 @@ function renderNav() {
     document.getElementById('nav-tabs').innerHTML = `
         <a href="pos.html">POS</a>
         <a href="inventory.html" class="active">Inventory</a>
-<a href="store.html">Store → Shop</a>
 <a href="dashboard.html">Dashboard</a>
         <a href="staff.html">Staff</a>
         <a href="reports.html">Reports</a>
@@ -134,13 +149,15 @@ function renderNav() {
       errorEl.style.display = 'none';
 
       const name = document.getElementById('np-name').value.trim();
+      const department = document.getElementById('np-department').value;
       const category = document.getElementById('np-type').value.trim();
       const stock_quantity = parseInt(document.getElementById('np-stock').value, 10);
+      const cost = parseFloat(document.getElementById('np-cost').value);
       const price = parseFloat(document.getElementById('np-price').value);
       const photoFile = document.getElementById('np-photo').files[0];
 
       if (!name || isNaN(price)) {
-        errorEl.textContent = 'Name and price are required.';
+        errorEl.textContent = 'Name and selling price are required.';
         errorEl.style.display = 'block';
         return;
       }
@@ -167,8 +184,10 @@ function renderNav() {
 
       const { error } = await supabaseClient.from('products').insert({
         name,
+        department,
         category,
         price,
+        cost: isNaN(cost) ? 0 : cost,
         stock_quantity: isNaN(stock_quantity) ? 0 : stock_quantity,
         reorder_level: 2,
         is_active: true,
@@ -186,6 +205,7 @@ function renderNav() {
       document.getElementById('np-name').value = '';
       document.getElementById('np-type').value = '';
       document.getElementById('np-stock').value = '';
+      document.getElementById('np-cost').value = '';
       document.getElementById('np-price').value = '';
       document.getElementById('np-photo').value = '';
       btn.disabled = false;
@@ -229,11 +249,14 @@ function renderNav() {
       if (!products.length) { el.innerHTML = '<div class="empty-state">No products yet. Add one above.</div>'; return; }
       el.innerHTML = `
         <table>
-          <thead><tr><th>Photo</th><th>Product</th><th>Type</th><th>Price</th><th>Stock</th><th>Date Added</th><th></th></tr></thead>
+          <thead><tr><th>Photo</th><th>Product</th><th>Dept</th><th>Type</th><th>Cost</th><th>Price</th><th>Profit/unit</th><th>Stock</th><th>Date Added</th><th></th></tr></thead>
           <tbody>
             ${products.map(p => {
               const low = p.stock_quantity <= (p.reorder_level ?? 2);
               const dateAdded = p.created_at ? new Date(p.created_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+              const cost = Number(p.cost || 0);
+              const price = Number(p.price || 0);
+              const profitUnit = price - cost;
               const photoCell = p.photo_url
                 ? `<img src="${escapeHtml(p.photo_url)}" style="width:44px; height:44px; object-fit:cover; border-radius:6px;">`
                 : `<div style="width:44px; height:44px; border-radius:6px; background:var(--bg); display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:0.7rem;">—</div>`;
@@ -241,8 +264,11 @@ function renderNav() {
                 <tr>
                   <td>${photoCell}</td>
                   <td><strong>${escapeHtml(p.name)}</strong></td>
+                  <td style="font-size:0.78rem;">${escapeHtml(p.department || '—')}</td>
                   <td>${escapeHtml(p.category || '—')}</td>
-                  <td>Ksh ${Number(p.price).toLocaleString()}</td>
+                  <td>Ksh ${cost.toLocaleString()}</td>
+                  <td>Ksh ${price.toLocaleString()}</td>
+                  <td style="color:${profitUnit >= 0 ? '#065f46' : '#991b1b'}; font-weight:600;">Ksh ${profitUnit.toLocaleString()}</td>
                   <td><span class="badge ${low ? 'low' : 'in_stock'}">${p.stock_quantity}</span></td>
                   <td style="font-size:0.8rem; color:var(--muted);">${dateAdded}</td>
                   <td>
@@ -292,8 +318,10 @@ function renderNav() {
       editingProductId = productId;
 
       document.getElementById('ep-name').value = product.name || '';
+      document.getElementById('ep-department').value = product.department || 'Household Items';
       document.getElementById('ep-type').value = product.category || '';
       document.getElementById('ep-stock').value = product.stock_quantity ?? 0;
+      document.getElementById('ep-cost').value = product.cost ?? '';
       document.getElementById('ep-price').value = product.price ?? '';
       document.getElementById('ep-photo').value = '';
       document.getElementById('ep-current-photo').innerHTML = product.photo_url
@@ -316,13 +344,15 @@ function renderNav() {
       errorEl.style.display = 'none';
 
       const name = document.getElementById('ep-name').value.trim();
+      const department = document.getElementById('ep-department').value;
       const category = document.getElementById('ep-type').value.trim();
       const stock_quantity = parseInt(document.getElementById('ep-stock').value, 10);
+      const cost = parseFloat(document.getElementById('ep-cost').value);
       const price = parseFloat(document.getElementById('ep-price').value);
       const photoFile = document.getElementById('ep-photo').files[0];
 
       if (!name || isNaN(price)) {
-        errorEl.textContent = 'Name and price are required.';
+        errorEl.textContent = 'Name and selling price are required.';
         errorEl.style.display = 'block';
         return;
       }
@@ -332,7 +362,8 @@ function renderNav() {
       btn.textContent = 'Saving...';
 
       const updates = {
-        name, category, price,
+        name, department, category, price,
+        cost: isNaN(cost) ? 0 : cost,
         stock_quantity: isNaN(stock_quantity) ? 0 : stock_quantity
       };
 
