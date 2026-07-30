@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Login — Appliance Shop POS</title>
+<title>Login — Thuku Enterprise</title>
 <link rel="stylesheet" href="css/style.css">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0f2137">
@@ -16,7 +16,7 @@
 
   <div class="login-wrap">
     <div class="card login-card">
-      <h1>Appliance Shop POS</h1>
+      <h1>Thuku Enterprise</h1>
       <p class="sub">Sign in to continue</p>
 
       <!-- LOGIN FORM -->
@@ -66,11 +66,7 @@
   <script src="js/offline-cache.js"></script>
   <script src="js/supabase-config.js"></script>
   <script>
-    // ── CHECK IF ADMIN EXISTS ──────────────────────────────────────────────
-    // On page load, check if any admin exists.
-    // If none, show the "Create Owner Account" button.
     (async () => {
-      // If already logged in, redirect immediately
       const { data: { session } } = await supabaseClient.auth.getSession();
       if (session) {
         const staff = await getCurrentStaff();
@@ -80,7 +76,6 @@
         }
       }
 
-      // Check if any admin exists in the staff table
       const { data, error } = await supabaseClient
         .from('staff')
         .select('id')
@@ -88,12 +83,10 @@
         .limit(1);
 
       if (!error && (!data || data.length === 0)) {
-        // No admin exists — show setup button
         document.getElementById('setup-section').style.display = 'block';
       }
     })();
 
-    // ── LOGIN ──────────────────────────────────────────────────────────────
     document.getElementById('login-btn').addEventListener('click', login);
     document.getElementById('password').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') login();
@@ -137,7 +130,6 @@
       window.location.href = staff.role === 'admin' ? 'dashboard.html' : 'pos.html';
     }
 
-    // ── SHOW / HIDE CREATE FORM ────────────────────────────────────────────
     document.getElementById('show-create-btn').addEventListener('click', () => {
       document.getElementById('login-form').style.display  = 'none';
       document.getElementById('create-form').style.display = 'block';
@@ -148,7 +140,6 @@
       document.getElementById('login-form').style.display  = 'block';
     });
 
-    // ── CREATE OWNER ACCOUNT ───────────────────────────────────────────────
     document.getElementById('create-btn').addEventListener('click', createOwner);
 
     async function createOwner() {
@@ -173,7 +164,6 @@
       btn.disabled = true;
       btn.textContent = 'Creating...';
 
-      // 1. Create auth user
       const { data, error } = await supabaseClient.auth.signUp({ email, password });
       if (error) {
         errorEl.textContent = error.message;
@@ -183,7 +173,6 @@
         return;
       }
 
-      // 2. Insert into staff table as admin
       const { error: staffError } = await supabaseClient.from('staff').insert({
         id:        data.user.id,
         full_name: name,
@@ -199,7 +188,6 @@
         return;
       }
 
-      // 3. Auto login
       await supabaseClient.auth.signInWithPassword({ email, password });
       window.location.href = 'dashboard.html';
     }
@@ -223,20 +211,17 @@
       e.preventDefault();
       deferredPrompt = e;
       installBtn.style.display = 'block';
-      console.log('App is installable — showing install button.');
     });
 
     installBtn.addEventListener('click', async () => {
       if (!deferredPrompt) return;
       installBtn.style.display = 'none';
-      const result = await deferredPrompt.prompt();
-      console.log('Install prompt outcome:', result.outcome);
+      await deferredPrompt.prompt();
       deferredPrompt = null;
     });
 
     window.addEventListener('appinstalled', () => {
       installBtn.style.display = 'none';
-      console.log('App was installed successfully.');
     });
   </script>
 </body>
