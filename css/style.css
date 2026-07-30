@@ -114,6 +114,8 @@ button.secondary { background: transparent; color: var(--navy); border: 1px soli
 button.gold { background: var(--gold); color: #2a1f08; }
 button.danger { background: var(--red); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+.dept-tab { background: transparent; color: var(--navy); border: 1px solid var(--border); padding: 8px 10px; font-size: 0.85rem; }
+.dept-tab.active { background: var(--navy); color: #fff; border-color: var(--navy); }
 
 input, select, textarea {
   width: 100%;
