@@ -4,9 +4,10 @@
 let currentStaffReports = null;
 
 (async () => {
-  currentStaffReports = await requireAuth(['admin']);
+  currentStaffReports = await requireAuth(['admin','owner']);
   if (!currentStaffReports) return;
   document.getElementById('staff-name').textContent = `${currentStaffReports.full_name} (${currentStaffReports.role})`;
+  renderReportsNav(currentStaffReports.role);
 
   // Default the date picker to today
   const today = new Date();
@@ -18,6 +19,17 @@ let currentStaffReports = null;
   await loadDailyReport();
 })();
 
+function renderReportsNav(role) {
+  const tabs = [{ href: 'pos.html', label: 'POS' }];
+  if (role === 'admin') tabs.push({ href: 'inventory.html', label: 'Inventory' });
+  tabs.push({ href: 'dashboard.html', label: 'Dashboard' });
+  if (role === 'admin') tabs.push({ href: 'staff.html', label: 'Staff' });
+  tabs.push({ href: 'reports.html', label: 'Reports' });
+  document.getElementById('nav-tabs').innerHTML = tabs.map(t =>
+    `<a href="${t.href}" class="${t.href === 'reports.html' ? 'active' : ''}">${t.label}</a>`
+  ).join('');
+}
+
 async function loadDailyReport() {
   const dateInput = document.getElementById('report-date').value;
   if (!dateInput) { alert('Please select a date.'); return; }
@@ -27,7 +39,7 @@ async function loadDailyReport() {
 
   const { data: sales, error } = await supabaseClient
     .from('sales')
-    .select('*, staff(full_name), sale_items(product_id, quantity, unit_price)')
+    .select('*, staff(full_name), sale_items(product_id, quantity, unit_price, products(cost))')
     .in('status', ['completed', 'refunded'])
     .gte('created_at', dayStart.toISOString())
     .lte('created_at', dayEnd.toISOString())
@@ -49,11 +61,21 @@ function renderReport(sales) {
   const itemsSold = completedSales.reduce((sum, s) =>
     sum + (s.sale_items || []).reduce((isum, item) => isum + (item.quantity || 1), 0), 0);
   const averageSale = transactions > 0 ? revenue / transactions : 0;
+  const totalDiscounts = completedSales.reduce((sum, s) => sum + Number(s.discount_amount || 0), 0);
+  const grossProfit = completedSales.reduce((sum, s) => {
+    const saleProfit = (s.sale_items || []).reduce((isum, item) => {
+      const cost = Number(item.products?.cost || 0);
+      return isum + (Number(item.unit_price) - cost) * (item.quantity || 1);
+    }, 0);
+    return sum + saleProfit;
+  }, 0);
 
   document.getElementById('total-sales').textContent = transactions;
   document.getElementById('total-revenue').textContent = `KSh ${revenue.toLocaleString()}`;
   document.getElementById('items-sold').textContent = itemsSold;
   document.getElementById('average-sale').textContent = `KSh ${Math.round(averageSale).toLocaleString()}`;
+  document.getElementById('total-discounts').textContent = `KSh ${totalDiscounts.toLocaleString()}`;
+  document.getElementById('total-profit').textContent = `KSh ${Math.round(grossProfit).toLocaleString()}`;
 
   const tbody = document.getElementById('sales-table');
   if (!sales.length) {
