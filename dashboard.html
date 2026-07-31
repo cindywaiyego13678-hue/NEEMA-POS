@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Owner Dashboard — Appliance Shop</title>
+<title>Owner Dashboard — Thuku Enterprise</title>
 <link rel="stylesheet" href="css/style.css">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0f2137">
@@ -38,6 +38,10 @@
         <div class="label">Low Stock Items</div>
         <div class="value alert" id="stat-low-stock">—</div>
       </div>
+      <div class="stat-card">
+        <div class="label">Today's Gross Profit</div>
+        <div class="value good" id="stat-today-profit">—</div>
+      </div>
     </div>
 
     <div class="grid" style="grid-template-columns: 1.2fr 1fr;">
@@ -53,6 +57,11 @@
     </div>
 
     <div class="card">
+      <h3 style="margin-top:0;">🚚 Incoming Transfers from Store</h3>
+      <div id="incoming-transfers-list"></div>
+    </div>
+
+    <div class="card">
       <h3 style="margin-top:0;">🏆 Top Sellers (Last 30 Days)</h3>
       <div id="top-sellers"></div>
     </div>
@@ -64,15 +73,16 @@
     let currentStaff = null;
 
     (async () => {
-      currentStaff = await requireAuth(['admin']);
+      currentStaff = await requireAuth(['admin','owner']);
       if (!currentStaff) return;
-      document.getElementById('staff-name').textContent = `${currentStaff.full_name} (owner)`;
-      renderNav();
+      document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
+      renderNav(currentStaff.role);
       await Promise.all([
         loadStats(),
         loadRecentSales(),
         loadLowStock(),
-        loadTopSellers()
+        loadTopSellers(),
+        loadIncomingTransfers()
       ]);
       setInterval(() => {
         loadStats();
@@ -80,14 +90,15 @@
       }, 60000);
     })();
 
-    function renderNav() {
-      document.getElementById('nav-tabs').innerHTML = `
-        <a href="pos.html">POS</a>
-        <a href="inventory.html">Inventory</a>
-        <a href="dashboard.html" class="active">Dashboard</a>
-       <a href="staff.html">Staff</a>
-       <a href="reports.html">Reports</a>
-      `;
+    function renderNav(role) {
+      const tabs = [{ href: 'pos.html', label: 'POS' }];
+      if (role === 'admin') tabs.push({ href: 'inventory.html', label: 'Inventory' });
+      tabs.push({ href: 'dashboard.html', label: 'Dashboard' });
+      if (role === 'admin') tabs.push({ href: 'staff.html', label: 'Staff' });
+      tabs.push({ href: 'reports.html', label: 'Reports' });
+      document.getElementById('nav-tabs').innerHTML = tabs.map(t =>
+        `<a href="${t.href}" class="${t.href === 'dashboard.html' ? 'active' : ''}">${t.label}</a>`
+      ).join('');
     }
 
     function startOfDayISO() {
@@ -111,15 +122,25 @@
         .from('sales').select('total_amount').eq('status','completed').gte('created_at', weekStart);
       const { data: lowStock } = await supabaseClient
         .from('products').select('id, stock_quantity, reorder_level').eq('is_active', true);
+      const { data: todayItems } = await supabaseClient
+        .from('sale_items')
+        .select('quantity, unit_price, products(cost), sales!inner(created_at, status)')
+        .gte('sales.created_at', todayStart)
+        .eq('sales.status', 'completed');
 
       const todayRevenue = (todaySales || []).reduce((s, r) => s + Number(r.total_amount), 0);
       const weekRevenue = (weekSales || []).reduce((s, r) => s + Number(r.total_amount), 0);
       const lowStockCount = (lowStock || []).filter(p => p.stock_quantity <= (p.reorder_level ?? 2)).length;
+      const todayProfit = (todayItems || []).reduce((s, i) => {
+        const cost = Number(i.products?.cost || 0);
+        return s + (Number(i.unit_price) - cost) * (i.quantity || 1);
+      }, 0);
 
       document.getElementById('stat-today-revenue').textContent = `Ksh ${todayRevenue.toLocaleString()}`;
       document.getElementById('stat-today-count').textContent = (todaySales || []).length;
       document.getElementById('stat-week-revenue').textContent = `Ksh ${weekRevenue.toLocaleString()}`;
       document.getElementById('stat-low-stock').textContent = lowStockCount;
+      document.getElementById('stat-today-profit').textContent = `Ksh ${Math.round(todayProfit).toLocaleString()}`;
     }
 
     async function loadRecentSales() {
@@ -196,6 +217,49 @@
             `).join('')}
           </tbody>
         </table>`;
+    }
+
+    async function loadIncomingTransfers() {
+      const { data, error } = await supabaseClient
+        .from('incoming_transfers')
+        .select('*')
+        .order('received_at', { ascending: false })
+        .limit(20);
+      const el = document.getElementById('incoming-transfers-list');
+      if (error || !data || !data.length) {
+        el.innerHTML = '<div class="empty-state">No transfers from the store yet.</div>';
+        return;
+      }
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Date</th><th>Sent By</th><th>Items</th><th>Value</th><th>Payment</th><th></th></tr></thead>
+          <tbody>
+            ${data.map(t => {
+              const dateStr = new Date(t.received_at).toLocaleString('en-KE', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+              const items = (t.items || []).map(i => `${i.quantity} × ${escapeHtml(i.product_name)}`).join('<br>');
+              const badgeClass = t.payment_status === 'paid' ? 'in_stock' : t.payment_status === 'partial' ? 'low' : 'low';
+              return `
+                <tr>
+                  <td style="font-size:0.82rem; white-space:nowrap;">${dateStr}</td>
+                  <td style="font-size:0.85rem;">${escapeHtml(t.sent_by || '—')}</td>
+                  <td style="font-size:0.82rem;">${items || '—'}</td>
+                  <td>Ksh ${Number(t.total_value || 0).toLocaleString()}</td>
+                  <td><span class="badge ${badgeClass}">${t.payment_status}</span></td>
+                  <td>${t.payment_status !== 'paid' ? `<button class="secondary" style="padding:5px 8px; font-size:0.78rem;" onclick='markTransferPaid(${JSON.stringify(t.id)})'>Mark Paid</button>` : ''}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    async function markTransferPaid(id) {
+      if (!confirm('Mark this transfer as fully paid?')) return;
+      const { error } = await supabaseClient
+        .from('incoming_transfers')
+        .update({ payment_status: 'paid' })
+        .eq('id', id);
+      if (error) { alert('Error: ' + error.message); return; }
+      await loadIncomingTransfers();
     }
 
     function escapeHtml(str) {
