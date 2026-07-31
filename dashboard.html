@@ -245,7 +245,13 @@
                   <td style="font-size:0.82rem;">${items || '—'}</td>
                   <td>Ksh ${Number(t.total_value || 0).toLocaleString()}</td>
                   <td><span class="badge ${badgeClass}">${t.payment_status}</span></td>
-                  <td>${t.payment_status !== 'paid' ? `<button class="secondary" style="padding:5px 8px; font-size:0.78rem;" onclick='markTransferPaid(${JSON.stringify(t.id)})'>Mark Paid</button>` : ''}</td>
+                  <td style="white-space:nowrap;">
+                    ${t.payment_status !== 'paid'
+                      ? `<button class="secondary" style="padding:5px 8px; font-size:0.78rem;" onclick='markTransferPaid(${JSON.stringify(t.id)})'>Mark Paid</button>`
+                      : t.received_into_inventory
+                        ? `<span class="badge in_stock">Received</span>`
+                        : `<button class="secondary" style="padding:5px 8px; font-size:0.78rem;" onclick='receiveTransfer(${JSON.stringify(t.id)})'>Receive into Inventory</button>`}
+                  </td>
                 </tr>`;
             }).join('')}
           </tbody>
@@ -260,6 +266,14 @@
         .eq('id', id);
       if (error) { alert('Error: ' + error.message); return; }
       await loadIncomingTransfers();
+    }
+
+    async function receiveTransfer(id) {
+      if (!confirm('Add these items into shop inventory now? Existing products are matched by name (case-insensitive); anything unmatched will be created as a new product. This can only be done once per transfer.')) return;
+      const { error } = await supabaseClient.rpc('receive_incoming_transfer', { p_transfer_id: id });
+      if (error) { alert('Error: ' + error.message); return; }
+      await loadIncomingTransfers();
+      alert('Inventory updated. Check the Inventory page to review names/prices for any newly created products.');
     }
 
     function escapeHtml(str) {
