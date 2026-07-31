@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Reports - NEEMA POS</title>
+<title>Reports — Thuku Enterprise</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -16,13 +16,7 @@
     </div>
 </div>
 <div class="container">
-<div class="nav-tabs">
-    <a href="dashboard.html">Dashboard</a>
-    <a href="pos.html">POS</a>
-    <a href="inventory.html">Inventory</a>
-    <a href="staff.html">Staff</a>
-    <a href="reports.html" class="active">Reports</a>
-</div>
+<div class="nav-tabs" id="nav-tabs"></div>
 <div class="card">
 <h2>Sales Reports</h2>
 <label>Select Report Date</label>
@@ -51,6 +45,14 @@ KSh 0
 <div class="value" id="average-sale">
 KSh 0
 </div>
+</div>
+<div class="stat-card">
+<div class="label">Discounts Given</div>
+<div class="value alert" id="total-discounts">KSh 0</div>
+</div>
+<div class="stat-card">
+<div class="label">Gross Profit</div>
+<div class="value good" id="total-profit">KSh 0</div>
 </div>
 </div>
 <div class="card">
