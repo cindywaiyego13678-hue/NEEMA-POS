@@ -4,7 +4,7 @@
 // Supabase API calls always go to the network (can't meaningfully
 // cache live data), but the app itself will open offline.
 // ============================================================
-const CACHE_NAME = 'appliance-pos-shell-v1';
+const CACHE_NAME = 'thuku-enterprise-shell-v2';
 
 const APP_SHELL = [
   './',
@@ -13,10 +13,12 @@ const APP_SHELL = [
   'inventory.html',
   'dashboard.html',
   'staff.html',
+  'reports.html',
   'css/style.css',
   'js/supabase-config.js',
   'js/offline-sync.js',
   'js/offline-cache.js',
+  'js/reports.js',
   'manifest.json',
   'icons/icon-192.png',
   'icons/icon-512.png'
