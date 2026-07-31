@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>POS — Appliance Shop</title>
+<title>POS — Thuku Enterprise</title>
 <link rel="stylesheet" href="css/style.css">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0f2137">
@@ -24,6 +24,14 @@
 
     <div class="grid" style="grid-template-columns: 1.3fr 1fr;">
       <div class="card">
+        <div id="low-stock-banner" style="display:none; background:#fef3c7; color:#92400e; border-radius:8px; padding:8px 12px; font-size:0.85rem; margin-bottom:12px; font-weight:600;"></div>
+
+        <div style="display:flex; gap:8px; margin-bottom:12px;">
+          <button type="button" class="dept-tab active" data-dept="" onclick="setDeptFilter('', this)" style="flex:1;">All</button>
+          <button type="button" class="dept-tab" data-dept="Household Items" onclick="setDeptFilter('Household Items', this)" style="flex:1;">Household</button>
+          <button type="button" class="dept-tab" data-dept="Clothes & Shoes" onclick="setDeptFilter('Clothes &amp; Shoes', this)" style="flex:1;">Clothes &amp; Shoes</button>
+        </div>
+
         <div class="field">
           <label>Search product</label>
           <input type="text" id="product-search" placeholder="Type name or type...">
@@ -107,7 +115,35 @@
     let allProducts = [];
     let currentStaff = null;
     let lastReceiptData = null;
+    let deptFilter = '';
     const HELD_SALES_KEY = 'appliance_pos_held_sales';
+
+    function setDeptFilter(dept, btnEl) {
+      deptFilter = dept;
+      document.querySelectorAll('.dept-tab').forEach(b => b.classList.remove('active'));
+      btnEl.classList.add('active');
+      applyProductFilters();
+    }
+
+    function applyProductFilters() {
+      const q = document.getElementById('product-search').value.toLowerCase();
+      const filtered = allProducts.filter(p => {
+        const matchesDept = !deptFilter || p.department === deptFilter;
+        const matchesSearch = p.name.toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q);
+        return matchesDept && matchesSearch;
+      });
+      renderProductList(filtered);
+    }
+
+    function updateLowStockBanner() {
+      const banner = document.getElementById('low-stock-banner');
+      const lowItems = allProducts.filter(p => p.stock_quantity <= (p.reorder_level ?? 2));
+      if (!lowItems.length) { banner.style.display = 'none'; return; }
+      const names = lowItems.slice(0, 4).map(p => escapeHtml(p.name)).join(', ');
+      const extra = lowItems.length > 4 ? ` and ${lowItems.length - 4} more` : '';
+      banner.innerHTML = `⚠️ Low stock: ${names}${extra}`;
+      banner.style.display = 'block';
+    }
 
     (async () => {
       currentStaff = await requireAuth(['admin','manager','cashier']);
@@ -136,6 +172,7 @@
           allProducts = cached.data;
           showOfflineBanner(cached.cachedAt);
           renderProductList(allProducts);
+          updateLowStockBanner();
         }
         return;
       }
@@ -151,6 +188,7 @@
           allProducts = cached.data;
           showOfflineBanner(cached.cachedAt);
           renderProductList(allProducts);
+          updateLowStockBanner();
         }
         return;
       }
@@ -158,6 +196,7 @@
       allProducts = data;
       cacheSet('products_list', data);
       renderProductList(allProducts);
+      updateLowStockBanner();
     }
 
     function renderProductList(products) {
@@ -173,12 +212,7 @@
         </div>`).join('');
     }
 
-    document.getElementById('product-search').addEventListener('input', (e) => {
-      const q = e.target.value.toLowerCase();
-      renderProductList(allProducts.filter(p =>
-        p.name.toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q)
-      ));
-    });
+    document.getElementById('product-search').addEventListener('input', applyProductFilters);
 
     function addToCart(productId) {
       const product = allProducts.find(p => p.id === productId);
@@ -406,7 +440,7 @@
     // ---------- Receipt ----------
     function showReceipt(data) {
       lastReceiptData = data;
-      const shopName = 'Appliance Shop';
+      const shopName = 'Thuku Enterprise';
       const lines = data.items.map(it =>
         `${it.name} x${it.quantity}`.padEnd(28) + `Ksh ${(it.price * it.quantity).toLocaleString()}`
       ).join('\n');
@@ -450,7 +484,7 @@
       if (!lastReceiptData) return;
       const d = lastReceiptData;
       const lines = d.items.map(it => `${it.name} x${it.quantity} - Ksh ${(it.price * it.quantity).toLocaleString()}`).join('%0A');
-      let text = `*Appliance Shop Receipt*%0A${d.date.toLocaleString('en-KE')}%0A%0A${lines}%0A%0ASubtotal: Ksh ${d.subtotal.toLocaleString()}`;
+      let text = `*Thuku Enterprise Receipt*%0A${d.date.toLocaleString('en-KE')}%0A%0A${lines}%0A%0ASubtotal: Ksh ${d.subtotal.toLocaleString()}`;
       if (d.discount > 0) text += `%0ADiscount: -Ksh ${d.discount.toLocaleString()}`;
       text += `%0A*TOTAL: Ksh ${d.total.toLocaleString()}*%0A%0AThank you for your business!`;
 
@@ -469,4 +503,3 @@
   </script>
 </body>
 </html>
-
